@@ -4,4 +4,4 @@
  * Licensed under Boost License
  */
 
-module libLZHAM;
+module lzbacon;

@@ -14,7 +14,7 @@ static immutable TableUpdateSettings[20] gTableUpdateSettings	=
 	TableUpdateSettings(16, 48),TableUpdateSettings(32, 72),TableUpdateSettings(64, 64),TableUpdateSettings(98, 80),TableUpdateSettings(128, 96),
 	TableUpdateSettings(192, 112),TableUpdateSettings(256, 128),TableUpdateSettings(512, 128+16*2),TableUpdateSettings(1024, 128+16*4),TableUpdateSettings(2048, 128+16*6),
 	TableUpdateSettings(2048, 128+16*8),TableUpdateSettings(2048, 128+16*10),TableUpdateSettings(2048, 128+16*12),TableUpdateSettings(2048, 128+16*14),TableUpdateSettings(2048, 128+16*16)];
-public struct CLZDecompBase{
+public class CLZDecompBase{
 	enum{
 		cMinMatchLength = 2,
 		cMaxMatchLength = 257,

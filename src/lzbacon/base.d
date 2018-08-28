@@ -2,7 +2,7 @@ module lzbacon.base;
 
 import lzbacon.decompbase;
 
-public class LZBase : LZDecompBase{
+public class CLZBase : CLZDecompBase{
 	static const ubyte mSlotTab0[4096] = [0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9,
 		10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
 		12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
@@ -180,6 +180,21 @@ public class LZBase : LZDecompBase{
 		assert(ofs < (1U << mLZXPositionExtraBits[slot]));
 	}
 	public @nogc void initSlotTabs(){
+		uint slot, ofs;
+		for (uint i = 1; i < mNumLZXSlots; i++){
+			computeLZXPositionSlot(mLZXPositionBase[i], slot, ofs);
+			assert(slot == i);
+			
+			computeLZXPositionSlot(mLZXPositionBase[i] + mLZXPositionExtraMask[i], slot, ofs);
+			assert(slot == i);
+		}
 		
+		for (uint i = 1; i <= (m_dict_size-1); i += 512U*1024U){
+			computeLZXPositionSlot(i, slot, ofs);
+			assert(i == mLZXPositionBase[slot] + ofs);
+		}
+		
+		computeLZXPositionSlot(m_dict_size - 1, slot, ofs);
+		assert((m_dict_size - 1) == mLZXPositionBase[slot] + ofs);
 	}
 }

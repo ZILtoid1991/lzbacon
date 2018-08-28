@@ -85,4 +85,9 @@ public @nogc T nextPow2(T)(T val){
 
 public T[] ptrToArray(T)(T* ptr, size_t lenght){
 	return ptr[0..length];
-} 
+}
+
+/*@nogc long atomic_decrement32(atomic32_t pDest){
+	LZHAM_ASSERT((reinterpret_cast<ptr_bits_t>(pDest) & 3) == 0);
+	return (*pDest -= 1);
+}*/

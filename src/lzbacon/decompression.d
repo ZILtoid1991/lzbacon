@@ -26,7 +26,7 @@ enum{
 static const uint sHugeMatchBaseLen[4] = [ CLZDecompBase.cMaxMatchLen + 1, CLZDecompBase.cMaxMatchLen + 1 + 256, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024 + 4096 ];
 static const ubyte sHugeMatchCodeLen[4] = [ 8, 10, 12, 16 ];
 
-class LZHAMDecompressor : Fiber{
+public class LZHAMDecompressor : Fiber{
 	int state2;
 	
 	CLZDecompBase lzBase;
@@ -47,7 +47,7 @@ class LZHAMDecompressor : Fiber{
 	size_t origOutBufSize;
 	
 	LZHAMDecompressionParameters params;
-	
+
 	LZHAMDecompressionStatus status;
 	
 	RawQuasiAdaptiveHuffmanDataModel litTable;
