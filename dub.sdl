@@ -1,0 +1,6 @@
+name "lzbacon"
+description "LZHAM and deflate capable compression library."
+authors "Laszlo Szeremi"
+copyright "Copyright © 2018, Laszlo Szeremi"
+license "Boost"
+targetType "library"

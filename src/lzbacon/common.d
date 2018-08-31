@@ -7,6 +7,7 @@
 module lzbacon.common;
 
 import lzbacon.decompression;
+import lzbacon.compression;
 
 //NOTE: These probably will be thrown out
 static immutable int LZHAM_MIN_ALLOC_ALIGNMENT = size_t.sizeof*2;
@@ -84,7 +85,7 @@ struct LZHAMCompressionParameters{
 	int maxHelperThreads;      // max # of additional "helper" threads to create, must range between [-1,LZHAM_MAX_HELPER_THREADS], where -1=max practical
 	uint compressFlags;         // optional compression flags (see lzham_compress_flags enum)
 	uint numSeedBytes;         // for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
-	const void* pSeedBytes;             // for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
+	void* pSeedBytes;             // for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
 	
 	// Advanced settings - set to 0 if you don't care.
 	// m_table_max_update_interval/m_table_update_interval_slow_rate override m_table_update_rate and allow finer control over the table update settings.
@@ -144,7 +145,7 @@ struct LZHAMDecompressionParameters{
 	uint tableUpdateRate;		// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
 	uint decompressFlags;       // optional decompression flags (see lzham_decompress_flags enum)
 	uint numSeedBytes;         // for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
-	const void *seedBytes;             // for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
+	void *seedBytes;             // for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
 
 	// Advanced settings - set to 0 if you don't care.
 	// m_table_max_update_interval/m_table_update_interval_slow_rate override m_table_update_rate and allow finer control over the table update settings.
@@ -210,8 +211,11 @@ struct LZHAMZStream{
 	uint avail_out;                 /// number of bytes that can be written to next_out
 	ulong total_out;                /// total number of bytes produced so far
 
-	LZHAMDecompressor state;   /// originally: internal state, allocated by zalloc/zfree, now a decompression algorithm
-
+	char* msg;
+	union{
+		LZHAMDecompressor stateDecomp;   /// originally: internal state, allocated by zalloc/zfree, now a decompression algorithm
+		LZHAMCompressState* stateComp;
+	}
 	// LZHAM does not support per-stream heap callbacks. Use lzham_set_memory_callbacks() instead.
 	// These members are ignored - they are here for backwards compatibility with zlib.
 	void* function() zalloc;              /// optional heap allocation function (defaults to malloc)
@@ -233,8 +237,10 @@ static immutable int LZHAM_Z_VER_MINOR = 8;
 static immutable int LZHAM_Z_VER_REVISION = 1;
 static immutable int LZHAM_Z_VER_SUBREVISION = 0;
 
+static immutable int LZHAM_Z_DEFAULT_WINDOW_BITS = 15;
+
 /// Class implementation of the LZHAM codec
-public class LZHAM{
+/*public class LZHAM{
 	public uint delegate() getVersion;
 	public uint delegate(void* function(void* opaque, void* address, size_t items, size_t size)) setMemoryCallbacks;
 
@@ -267,7 +273,7 @@ public class LZHAM{
 	public int delegate(LZHAMZStream* pStream, int flush) z_inflate;
 	public int delegate(LZHAMZStream* pStream) z_inflateEnd;
 	public int delegate(ubyte* pDest, ulong pDest_len, const ubyte* pSource, ulong pSource_len) z_decompress;
-	public const char* delegate(int error) z_version;
+	//public const char* delegate(int error) z_version;
 	this(){
 		
 	}
@@ -275,4 +281,4 @@ public class LZHAM{
 		
 	}
 
-}
+}*/

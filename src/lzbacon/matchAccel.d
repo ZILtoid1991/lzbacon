@@ -17,7 +17,7 @@ struct Node{
 
 struct DictMatch{
 	uint m_dist;
-	uint16 m_len;
+	ushort m_len;
 	
 	@nogc @property uint get_dist() const { 
 		return m_dist & 0x7FFFFFFF; 
@@ -31,7 +31,7 @@ struct DictMatch{
 }
 
 class SearchAccelerator{
-	static ubyte g_hamming_dist[256] =
+	static ubyte gHammingDist[256] =
 	[
 		0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
 			1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
@@ -50,7 +50,7 @@ class SearchAccelerator{
 			3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
 			4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8
 	];
-	CLZBase m_pLZBase;
+	CLZBase LZBase;
 	//task_pool* m_pTask_pool;	//don't know what will replace it yet
 	//Thread taskPool;	//I hope this will be good
 	uint m_max_helper_threads;
@@ -91,12 +91,16 @@ class SearchAccelerator{
 	
 	uint m_num_completed_helper_threads;
 	
-	void function(uint64 data, void* pData_ptr) find_all_matches_callback;
-	bool function(uint num_bytes) find_all_matches;
-	bool function() find_len2_matches;
+	//void function(uint64 data, void* pData_ptr) find_all_matches_callback;
+	//bool function(uint num_bytes) find_all_matches;
+	//bool function() find_len2_matches;
 
 	this(){
 
+	}
+
+	@nogc uint opIndex(size_t pos) const{
+		return m_dict[pos];
 	}
 
 	bool init(CLZBase pLZBase, /*task_pool* pPool,*/ uint max_helper_threads, uint max_dict_size, uint max_matches, bool all_matches, uint max_probes){
@@ -107,11 +111,12 @@ class SearchAccelerator{
 		//m_max_probes = LZHAM_MIN(cMatchAccelMaxSupportedProbes, max_probes);
 		this.m_max_probes = cMatchAccelMaxSupportedProbes > max_probes ? max_probes : cMatchAccelMaxSupportedProbes;
 		
-		this.m_pLZBase = pLZBase;
+		this.LZBase = pLZBase;
 		//m_pTask_pool = max_helper_threads ? pPool : null;
 		//this.m_max_helper_threads = m_pTask_pool ? max_helper_threads : 0;
 		this.m_max_helper_threads = max_helper_threads;
-		this.m_max_matches = LZHAM_MIN(m_max_probes, max_matches);
+		//this.m_max_matches = LZHAM_MIN(m_max_probes, max_matches);
+		this.m_max_matches = m_max_probes < max_matches ? m_max_probes : max_matches;
 		this.m_all_matches = all_matches;
 
 		this.m_max_dict_size = max_dict_size;
@@ -124,7 +129,7 @@ class SearchAccelerator{
 		m_fill_dict_size = 0;
 		m_num_completed_helper_threads = 0;
 
-		m_dict.length = max_dict_size + (m_max_dict_size > CLZBase.cMaxHugeMatchLength ? CLZBase.cMaxHugeMatchLength : m_max_dict_size);
+		m_dict.length = max_dict_size + (m_max_dict_size > CLZBase.cMaxHugeMatchLen ? CLZBase.cMaxHugeMatchLen : m_max_dict_size);
 		m_hash.length = cHashSize;
 		m_nodes.length = max_dict_size;
 		/*if (!m_dict.try_resize_no_construct(max_dict_size + LZHAM_MIN(m_max_dict_size, static_cast<uint>(CLZBase::cMaxHugeMatchLen))))
@@ -187,15 +192,15 @@ class SearchAccelerator{
 	@nogc uint get_char(uint cur_dict_pos, int delta_pos) const { 
 		return m_dict[(cur_dict_pos + delta_pos) & m_max_dict_size_mask]; 
 	}
-	@nogc const uint8* get_ptr(uint pos) const { 
+	@nogc @property ubyte* get_ptr(uint pos) { 
 		return &m_dict[pos]; 
 	}
 	
-	@nogc uint get_max_helper_threads() const { 
+	@nogc @property uint get_max_helper_threads() const { 
 		return m_max_helper_threads; 
 	}
 	
-	@nogc uint operator[](uint pos) const { 
+	@nogc uint operator(uint pos) const { 
 		return m_dict[pos]; 
 	}
 
@@ -232,19 +237,19 @@ class SearchAccelerator{
 			c0 = c1;
 			c1 = c2;
 			
-			assert(!m_hash_thread_index.size() || (m_hash_thread_index[h] != ubyte.max));
+			assert(!m_hash_thread_index.length || (m_hash_thread_index[h] != ubyte.max));
 			
 			// Only process those strings that this worker thread was assigned to - this allows us to manipulate multiple trees in parallel with no worries about synchronization.
-			if (m_hash_thread_index.size() && (m_hash_thread_index[h] != threadIndex)){
+			if (m_hash_thread_index.length && (m_hash_thread_index[h] != threadIndex)){
 				fillLookaheadPos++;
 				fillLookaheadSize--;
 				fillDictSize++;
 				continue;
 			}
 			
-			DictMatch* pDstMatch = tempMatches;
+			DictMatch* pDstMatch = tempMatches.ptr;
 			
-			uint cur_pos = m_hash[h];
+			uint curPos = m_hash[h];
 			m_hash[h] = cast(uint)(fillLookaheadPos);
 			
 			uint *pLeft = &m_nodes[insertPos].m_left;
@@ -258,49 +263,49 @@ class SearchAccelerator{
 			
 			uint n = m_max_probes;
 			for ( ; ; ){
-				uint deltaPos = fillLookaheadPos - cur_pos;
+				uint deltaPos = fillLookaheadPos - curPos;
 				if ((n-- == 0) || (!deltaPos) || (deltaPos >= fillDictSize)){
 					*pLeft = 0;
 					*pRight = 0;
 					break;
 				}
 				
-				uint pos = cur_pos & m_max_dict_size_mask;
-				node *pNode = &m_nodes[pos];
+				uint pos = curPos & m_max_dict_size_mask;
+				Node *pNode = &m_nodes[pos];
 				
 				// Unfortunately, the initial compare match_len must be 0 because of the way we hash and truncate matches at the end of each block.
 				uint matchLen = 0;
-				const uint8* pComp = &pDict[pos];
+				const ubyte* pComp = &pDict[pos];
 				
 //#if LZHAM_PLATFORM_X360 || (LZHAM_USE_UNALIGNED_INT_LOADS == 0)
 				for ( ; matchLen < max_match_len; matchLen++)
 					if (pComp[matchLen] != pIns[matchLen])
 						break;
 				if (matchLen > best_match_len){
-					pDstMatch->m_len = cast(ushort)(matchLen - CLZBase.cMinMatchLen);
-					pDstMatch->m_dist = deltaPos;
+					pDstMatch.m_len = cast(ushort)(matchLen - CLZBase.cMinMatchLen);
+					pDstMatch.m_dist = deltaPos;
 					pDstMatch++;
 					
 					best_match_len = matchLen;
 					
 					if (matchLen == max_match_len){
-						*pLeft = pNode->m_left;
-						*pRight = pNode->m_right;
+						*pLeft = pNode.m_left;
+						*pRight = pNode.m_right;
 						break;
 					}
 				}else if (m_all_matches){
-					pDstMatch->m_len = cast(ushort)(matchLen - CLZBase.cMinMatchLen);
-					pDstMatch->m_dist = deltaPos;
+					pDstMatch.m_len = cast(ushort)(matchLen - CLZBase.cMinMatchLen);
+					pDstMatch.m_dist = deltaPos;
 					pDstMatch++;
 				}else if ((best_match_len > 2) && (best_match_len == matchLen)){
 					uint bestMatchDist = pDstMatch[-1].m_dist;
 					uint compMatchDist = deltaPos;
 					
 					uint bestMatchSlot, bestMatchSlotOfs;
-					m_pLZBase->compute_lzx_position_slot(bestMatchDist, bestMatchSlot, bestMatchSlotOfs);
+					LZBase.computeLZXPositionSlot(bestMatchDist, bestMatchSlot, bestMatchSlotOfs);
 					
 					uint compMatchSlot, compMatchOfs;
-					m_pLZBase->compute_lzx_position_slot(compMatchDist, compMatchSlot, compMatchOfs);
+					LZBase.computeLZXPositionSlot(compMatchDist, compMatchSlot, compMatchOfs);
 					
 					// If both matches uses the same match slot, choose the one with the offset containing the lowest nibble as these bits separately entropy coded.
 					// This could choose a match which is further away in the absolute sense, but closer in a coding sense.
@@ -314,10 +319,10 @@ class SearchAccelerator{
 						uint desiredMismatchByte = pIns[matchLen];
 						
 						uint curMismatchByte = pDict[(insertPos - bestMatchDist + matchLen) & m_max_dict_size_mask];
-						uint curMismatchDist = g_hamming_dist[curMismatchByte ^ desiredMismatchByte];
+						uint curMismatchDist = gHammingDist[curMismatchByte ^ desiredMismatchByte];
 						
 						uint newMismatchByte = pComp[matchLen];
-						uint newMismatchDist = g_hamming_dist[newMismatchByte ^ desiredMismatchByte];
+						uint newMismatchDist = gHammingDist[newMismatchByte ^ desiredMismatchByte];
 						if (newMismatchDist < curMismatchDist){
 							assert((pDstMatch[-1].m_len + cast(uint)CLZBase.cMinMatchLen) == best_match_len);
 							pDstMatch[-1].m_dist = deltaPos;
@@ -325,33 +330,35 @@ class SearchAccelerator{
 					}
 				}
 				
-				uint new_pos;
+				uint newPos;
 				if (pComp[matchLen] < pIns[matchLen]){
-					*pLeft = cur_pos;
-					pLeft = &pNode->m_right;
-					new_pos = pNode->m_right;
+					*pLeft = curPos;
+					pLeft = &pNode.m_right;
+					newPos = pNode.m_right;
 				}else{
-					*pRight = cur_pos;
-					pRight = &pNode->m_left;
-					new_pos = pNode->m_left;
+					*pRight = curPos;
+					pRight = &pNode.m_left;
+					newPos = pNode.m_left;
 				}
-				if (new_pos == cur_pos)
+				if (newPos == curPos)
 					break;
-				cur_pos = new_pos;
+				curPos = newPos;
 			}
 			
-			const uint num_matches = (uint)(pDstMatch - tempMatches);
+			const uint numMatches = cast(uint)(pDstMatch - tempMatches.ptr);
 			
-			if (num_matches){
+			if (numMatches){
 				pDstMatch[-1].m_dist |= 0x80000000;
 				
-				const uint num_matches_to_write = LZHAM_MIN(num_matches, m_max_matches);
+				//const uint num_matches_to_write = LZHAM_MIN(num_matches, m_max_matches);
+				const uint numMatchesToWrite = numMatches < m_max_matches ? numMatches : m_max_matches;
 				
-				const uint match_ref_ofs = static_cast<uint>(atomic_exchange_add(&m_next_match_ref, num_matches_to_write));
+				//const uint match_ref_ofs = cast(uint)(atomic_exchange_add(&m_next_match_ref, num_matches_to_write));
+				const uint matchRefOfs = m_next_match_ref + numMatchesToWrite;
 				
-				memcpy(&m_matches[match_ref_ofs],
-					tempMatches + (num_matches - num_matches_to_write),
-					sizeof(tempMatches[0]) * num_matches_to_write);
+				memcpy(&m_matches[matchRefOfs],
+					tempMatches.ptr + (numMatches - numMatchesToWrite),
+					tempMatches[0].sizeof * numMatchesToWrite);
 				
 				// FIXME: This is going to really hurt on platforms requiring export barriers.
 				//LZHAM_MEMORY_EXPORT_BARRIER
@@ -429,17 +436,16 @@ class SearchAccelerator{
 		
 		//if (!m_pTask_pool){
 		if(m_max_helper_threads == 0){
-			find_all_matches_callback(0, NULL);
+			find_all_matches_callback(0, null);
 			
 			m_num_completed_helper_threads = 0;
 		}else{
-			if (!m_hash_thread_index.try_resize_no_construct(0x10000))
-				return false;
+			m_hash_thread_index.length = 0x10000;
 			
 			memset(m_hash_thread_index.ptr, 0xFF, m_hash_thread_index.length);
 			
 			uint nextThreadIndex = 0;
-			const uint8* pDict = &m_dict[m_lookahead_pos & m_max_dict_size_mask];
+			ubyte* pDict = &m_dict[m_lookahead_pos & m_max_dict_size_mask];
 			uint numUniqueTrigrams = 0;
 			
 			if (numBytes >= 3){
@@ -482,7 +488,7 @@ class SearchAccelerator{
 
 		return find_len2_matches();
 	}
-	bool add_bytes_begin(uint num_bytes, const uint8* pBytes){
+	bool add_bytes_begin(uint num_bytes, const ubyte* pBytes){
 		assert(num_bytes <= m_max_dict_size);
 		assert(!m_lookahead_size);
 		
@@ -542,8 +548,8 @@ class SearchAccelerator{
 		if ((!match_dist) || (match_dist > CLZBase.cMaxLen2MatchDist) || (match_dist > (m_cur_dict_size + lookahead_ofs)))
 			return 0;
 		
-		const uint8* pCur = &m_dict[cur_pos & m_max_dict_size_mask];
-		const uint8* pMatch = &m_dict[next_match_pos & m_max_dict_size_mask];
+		const ubyte* pCur = &m_dict[cur_pos & m_max_dict_size_mask];
+		const ubyte* pMatch = &m_dict[next_match_pos & m_max_dict_size_mask];
 		
 		if ((pCur[0] == pMatch[0]) && (pCur[1] == pMatch[1]))
 			return match_dist;
@@ -562,11 +568,10 @@ class SearchAccelerator{
 		uint spin_count = 0;
 		
 		// This may spin until the match finder job(s) catch up to the caller's lookahead position.
-		for ( ; ; )
-		{
+		for ( ; ; ){
 			match_ref = cast(int)(m_match_refs[match_ref_ofs]);
 			if (match_ref == -2)
-				return NULL;
+				return null;
 			else if (match_ref != -1)
 				break;
 			
@@ -615,11 +620,11 @@ class SearchAccelerator{
 		if (dist > find_dict_size)
 			return 0;
 
-		const uint compPos = static_cast<uint>((m_lookahead_pos + lookahead_ofs - dist) & m_max_dict_size_mask);
+		const uint compPos = cast(uint)((m_lookahead_pos + lookahead_ofs - dist) & m_max_dict_size_mask);
 		const uint lookaheadPos = (m_lookahead_pos + lookahead_ofs) & m_max_dict_size_mask;
 		
-		const uint8* pComp = &m_dict[compPos];
-		const uint8* pLookahead = &m_dict[lookaheadPos];
+		const ubyte* pComp = &m_dict[compPos];
+		const ubyte* pLookahead = &m_dict[lookaheadPos];
 		
 		uint matchLen;
 		for (matchLen = start_match_len; matchLen < max_match_len; matchLen++)

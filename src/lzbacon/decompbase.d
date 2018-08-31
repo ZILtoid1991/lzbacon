@@ -3,8 +3,8 @@ module lzbacon.decompbase;
 import lzbacon.common;
 
 @nogc struct TableUpdateSettings{
-	ushort mMaxUpdateInterval;
-	ushort mSlowRate;
+	ushort maxUpdateInterval;
+	ushort slowRate;
 	@nogc this(ushort mMaxUpdateInterval, ushort mSlowRate){
 	
 	}
@@ -15,10 +15,10 @@ static immutable TableUpdateSettings[20] gTableUpdateSettings	=
 	TableUpdateSettings(192, 112),TableUpdateSettings(256, 128),TableUpdateSettings(512, 128+16*2),TableUpdateSettings(1024, 128+16*4),TableUpdateSettings(2048, 128+16*6),
 	TableUpdateSettings(2048, 128+16*8),TableUpdateSettings(2048, 128+16*10),TableUpdateSettings(2048, 128+16*12),TableUpdateSettings(2048, 128+16*14),TableUpdateSettings(2048, 128+16*16)];
 public class CLZDecompBase{
-	enum{
-		cMinMatchLength = 2,
-		cMaxMatchLength = 257,
-		cMaxHugeMatchLength = 65536,
+	public static enum{
+		cMinMatchLen = 2,
+		cMaxMatchLen = 257,
+		cMaxHugeMatchLen = 65536,
 		cMinDictSizeLog2 = 15, cMaxDictSizeLog2 = 29, cMatchHistSize = 4, cMaxLen2MatchDist = 2047,
 		cLZXNumSecondaryLengths = 249, cNumHugeMatchCodes = 1, cMaxHugeMatchCodeBits = 16, cLZXNumSpecialLengths = 2, cLZXLowestUsableMatchSlot = 1, cLZXMaxPositionSlots = 128,
 		cLZXSpecialCodeEndOfBlockCode = 0, cLZXSpecialCodePartialStateReset = 1,
@@ -28,7 +28,7 @@ public class CLZDecompBase{
 	}
 
 	uint mDictSizeLog2;
-	uint mDictSize;
+	uint dictSize;
       
 	uint mNumLZXSlots;
 
@@ -67,7 +67,7 @@ public class CLZDecompBase{
 		assert(dictSizeLog2 >= LZHAM_MIN_DICT_SIZE_LOG2);
 		assert(dictSizeLog2 <= LZHAM_MAX_DICT_SIZE_LOG2_X64);
 		mDictSizeLog2 = dictSizeLog2;
-		mDictSize = 1<<dictSizeLog2;
+		dictSize = 1<<dictSizeLog2;
 		mNumLZXSlots = gNumLZXPositionSlots[mDictSizeLog2 - LZHAM_MIN_DICT_SIZE_LOG2];
 	}
 }

@@ -7,20 +7,44 @@ version(X86_64){
 	version(DMD){
 		static enum ENABLE_DMD_SIMD = true;
 	}
+	else{
+		static enum ENABLE_DMD_SIMD = false;
+	}
+	version(LDC){
+		static enum ENABLE_INTEL_INTRINSICS = true;
+		immutable uint[4] negator = [uint.max,uint.max,uint.max,uint.max];
+	}
+	else{
+		static enum ENABLE_INTEL_INTRINSICS = false;
+	}
 }
-version(LDC){
-	static enum ENABLE_INTEL_INTRINSICS = true;
-	immutable uint[4] negator = [uint.max,uint.max,uint.max,uint.max];
+else version(X86){
+	static enum CPU_64BIT_CAPABLE = false;
+	static enum ENABLE_DMD_SIMD = false;
+	version(LDC){
+		static enum ENABLE_INTEL_INTRINSICS = true;
+		immutable uint[4] negator = [uint.max,uint.max,uint.max,uint.max];
+	}
+	else{
+		static enum ENABLE_INTEL_INTRINSICS = false;
+	}
 }
-version(NEON){
-	static enum ENABLE_NEON = true;
+else version(ARM){
+	static enum CPU_64BIT_CAPABLE = false;
+	version(NEON){
+		static enum ENABLE_NEON = true;
+	}
+	else{
+		static enum ENABLE_NEON = false;
+	}
 }
-version(AArch64){
+else version(AArch64){
 	static enum CPU_64BIT_CAPABLE = true;
 	static enum ENABLE_NEON = true;
 }
 
-static LZHAMLogger logger;
+
+/*static LZHAMLogger logger;
 static bool forceFinish;
 
 public class LZHAMLogger{
@@ -34,7 +58,7 @@ public class LZHAMLogger{
 		if(onMessageLogging !is null)
 			onMessageLogging(s);
 	}
-}
+}*/
 
 
 public @nogc uint floor_log2i(int v){
@@ -48,7 +72,7 @@ public @nogc uint floor_log2i(int v){
 
 public @nogc uint ceil_log2i(int v){
 	uint l = floor_log2i(v);
-	if ((l != cIntBits) && (v > (1U << l)))
+	if ((l != 8) && (v > (1U << l)))
 		l++;
 	return l;
 }
@@ -83,8 +107,26 @@ public @nogc T nextPow2(T)(T val){
 	return val + 1;
 }
 
-public T[] ptrToArray(T)(T* ptr, size_t lenght){
-	return ptr[0..length];
+public T[] ptrToArray(T)(T* ptr, size_t length){
+	return ptr[0 .. length];
+}
+
+@nogc swap(T)(ref T a, ref T b){
+	T temp = a;
+	a = b;
+	b = temp;
+}
+/**
+ * Returns the greater of two values.
+ */
+@nogc T maximum(T)(T a, T b){
+	return a > b ? a : b;
+}
+/**
+ * Returns the lesser of two values.
+ */
+@nogc T minimum(T)(T a, T b){
+	return a > b ? a : b;
 }
 
 /*@nogc long atomic_decrement32(atomic32_t pDest){

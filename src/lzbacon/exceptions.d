@@ -46,6 +46,11 @@ public class OutputBufferTooSmallException : LZHAMException{
 		super(msg, file, line, nextInChain);
 	}
 }
+public class TarHeaderException : LZHAMException{
+	this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable nextInChain = null){
+		super(msg, file, line, nextInChain);
+	}
+}
 public class ChecksumException : LZHAMException{
 	size_t position;
 

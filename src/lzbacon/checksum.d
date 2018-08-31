@@ -6,9 +6,9 @@ import lzbacon.system;
 
 import std.digest.crc;
 
-static if(USE_INTEL_INTRINSICS){
+/*static if(USE_INTEL_INTRINSICS){
 	import inteli.emmintrin;
-}
+}*/
 
 enum{ 
 	ADLER_MOD = 65521
@@ -37,5 +37,6 @@ ubyte[] crc32(uint crc, ubyte* ptr, size_t buf_len){
 	scope const ubyte[] data = ptrToArray(ptr, buf_len);
 	c32.put(data);
 	c32.start;
-	return c32.finish; 
+	ubyte[] result = c32.finish();
+	return result; 
 }

@@ -1,6 +1,10 @@
 module lzbacon.symbolCodec;
 
+import core.stdc.string;
+import core.stdc.stdlib;
+
 import lzbacon.prefixCoding;
+import lzbacon.huffmanCodes;
 
 import lzbacon.system;
 /*currently disabled*/
@@ -259,7 +263,7 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 	/**
 	 * Changed from the original.
 	 */
-	public  RawQuasiAdaptiveHuffmanDataModel opAssign(const RawQuasiAdaptiveHuffmanDataModel rhs){
+	public RawQuasiAdaptiveHuffmanDataModel assign(RawQuasiAdaptiveHuffmanDataModel rhs){
 		if(this == rhs){
 			return this;
 		}
@@ -284,14 +288,15 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 					return null;
 				}
 			}else{
-				m_pDecodeTables = (*rhs.m_pDecodeTables);
+				m_pDecodeTables = (rhs.m_pDecodeTables);
 				if(!m_pDecodeTables){
 					clear();
-				return false;
+					return null;
 				}
 			}
 		}else if (m_pDecodeTables){
-			free(cast(void*)m_pDecodeTables);
+			//free(cast(void*)m_pDecodeTables);
+
 			m_pDecodeTables = null;
 		}
 		mDecoderTableBits = rhs.mDecoderTableBits;
@@ -376,31 +381,31 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 		if (!mTotalSyms)
 			return true;
 
-		bool sym_freq_all_ones = false;
+		bool symFreqAllOnes = false;
 
 		if (mInitialSymFreq.length){
 			mUpdateCycle = 0;
-			for (uint i; i < m_total_syms; i++){
-				uint sym_freq = mInitialSymFreq[i];
-				mSymFreq[i] = cast(ushort)(sym_freq);
+			for (uint i; i < mTotalSyms; i++){
+				uint symFreq = mInitialSymFreq[i];
+				mSymFreq[i] = cast(ushort)(symFreq);
             
 			    // Slam m_update_cycle to a specific value so update_tables() sets m_total_count to the proper value
-				mUpdateCycle += sym_freq;
+				mUpdateCycle += symFreq;
 			}
 		}else{
-			for (uint i; i < m_total_syms; i++)
+			for (uint i; i < mTotalSyms; i++)
 				mSymFreq[i] = 1;
          
 			// Slam m_update_cycle to a specific value so update_tables() sets m_total_count to the proper value
 			mUpdateCycle = mTotalSyms;
          
-			sym_freq_all_ones = true;
+			symFreqAllOnes = true;
 		}
 
 		mTotalCount = 0;
 		mSymbolsUntilUpdate = 0;
             
-		if (!updateTables(mMaxCycle > 16 ?  16 : mMaxCycle, sym_freq_all_ones)) // this was 8 in the alphas
+		if (!updateTables(mMaxCycle > 16 ?  16 : mMaxCycle, symFreqAllOnes)) // this was 8 in the alphas
 			return false;
                            
 		return true;
@@ -408,7 +413,7 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 
 	@nogc @property uint totalSyms(){ return mTotalSyms; }
 
-	void rescale(){
+	@nogc void rescale(){
 		uint totalFreq = 0;
 
 		for (uint i ; i < mTotalSyms; i++){
@@ -419,27 +424,40 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 
 		mTotalCount = totalFreq;
 	}
-	void resetUpdateRate(){
+	@nogc void resetUpdateRate(){
 		mTotalCount += (mUpdateCycle - mSymbolsUntilUpdate);
 
 		debug{
-			uint actual_total = 0;
+			uint actualTotal = 0;
 			for (uint i = 0; i < mSymFreq.length; i++)
-				actual_total += mSymFreq[i];
-			assert(actual_total == m_total_count);
+				actualTotal += mSymFreq[i];
+			assert(actualTotal == mTotalCount);
 		}
 
 		if (mTotalCount > mTotalSyms)
 			rescale();
 
-		mSymbolsUntilUpdate = mUpdateCycle = LZHAM_MIN(8, mUpdateCycle);
+		//mSymbolsUntilUpdate = mUpdateCycle = LZHAM_MIN(8, mUpdateCycle);
+		mSymbolsUntilUpdate = mUpdateCycle = 8 < mUpdateCycle ? 8 : mUpdateCycle;
 	}
 
 	bool updateSym(uint sym){
+		uint freq = mSymFreq[sym];
+		freq++;
+		mSymFreq[sym] = cast(ushort)(freq);
 		
+		assert(freq <= ushort.max);
+		
+		if (--mSymbolsUntilUpdate == 0)
+		{
+			if (!updateTables())
+				return false;
+		}
+		
+		return true;
 	}
 
-	@nogc ulong getCost(uint sym){ 
+	@nogc ulong getCost(uint sym) const{ 
 		return convertToScaledBitcost(mCodeSizes[sym]);
 	}
 
@@ -468,10 +486,10 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 		}
 
 		bool status = false;
-		if (!max_code_size){
-			uint tableSize = getGenerateHuffmanCodesTableSize();
+		if (!maxCodeSize){
+			//uint tableSize = getGenerateHuffmanCodesTableSize();
 			uint tableSize = HuffmanWorkTables.sizeof;
-			void *pTables = alloca(table_size);
+			void *pTables = alloca(tableSize);
 
 			uint totalFreq = 0;                  
 			status = generateHuffmanCodes(pTables, mTotalSyms, mSymFreq.ptr, mCodeSizes.ptr, maxCodeSize, totalFreq);
@@ -482,7 +500,7 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 
 			if (maxCodeSize > cMaxExpectedCodeSize){
 				status = limitMaxCodeSize(mTotalSyms, mCodeSizes.ptr, cMaxExpectedCodeSize);
-				LZHAM_ASSERT(status);
+				assert(status);
 		        if (!status)
 				return false;
 			}
@@ -535,9 +553,9 @@ alias QuasiAdaptiveHuffmanDataModel = RawQuasiAdaptiveHuffmanDataModel;
 /**
  * This might become a struct later on, since it only holds a single 16bit unsigned value
  */
-public class AdaptiveBitModel{
+public struct AdaptiveBitModel{
 	ushort bit0Prob;
-	this() { clear(); }
+	//this() { clear(); }
 	this(float prob0){
 		setProbability0(prob0);
 	}
@@ -545,13 +563,13 @@ public class AdaptiveBitModel{
 		bit0Prob = other.bit0Prob;
 	}
 
-	@nogc AdaptiveBitModel opAssign(const AdaptiveBitModel rhs){ 
+	/*@nogc AdaptiveBitModel opAssign(const AdaptiveBitModel rhs){ 
 		bit0Prob = rhs.bit0Prob;
 		return this;
-	}
+	}*/
 
 	@nogc void clear(){
-		mBit0Prob  = 1U << (cSymbolCodecArithProbBits - 1);
+		bit0Prob  = 1U << (cSymbolCodecArithProbBits - 1);
 	}
 
 	@nogc void setProbability0(float prob0){
@@ -560,19 +578,19 @@ public class AdaptiveBitModel{
 			val = 1;
 		else if(val > cSymbolCodecArithProbScale - 1)
 			val = cSymbolCodecArithProbScale - 1;
-		bit0prob = cast(ushort)(val);
+		bit0Prob = cast(ushort)(val);
 	}
 
 	void update(uint bit){
 		if (!bit)
-			mBit0Prob += ((cSymbolCodecArithProbScale - mBit0Prob) >> cSymbolCodecArithProbMoveBits);
+			bit0Prob += ((cSymbolCodecArithProbScale - bit0Prob) >> cSymbolCodecArithProbMoveBits);
 		else
-			mBit0Prob -= (m_bit_0_prob >> cSymbolCodecArithProbMoveBits);
-		assert(mBit0Prob >= 1);
-		assert(mBit0Prob < cSymbolCodecArithProbScale);
+			bit0Prob -= (bit0Prob >> cSymbolCodecArithProbMoveBits);
+		assert(bit0Prob >= 1);
+		assert(bit0Prob < cSymbolCodecArithProbScale);
 	}
 
-	@nogc ulong getCost(uint bit){ return gProbCost[bit ? (cSymbolCodecArithProbScale - mBit0Prob) : mBit0Prob]; }
+	@nogc ulong getCost(uint bit) const{ return gProbCost[bit ? (cSymbolCodecArithProbScale - bit0Prob) : bit0Prob]; }
 
 }
 public class AdaptiveArithDataModel{
@@ -606,7 +624,7 @@ public class AdaptiveArithDataModel{
 	}
 	bool init(bool encoding, uint totalSyms, bool fastEncoding){
 		//LZHAM_NOTE_UNUSED(fast_encoding); 
-		return init(encoding, total_syms);
+		return init(encoding, totalSyms);
 	}
 	void reset(){
 		foreach(abm ; probs){
@@ -666,13 +684,13 @@ public class SymbolCodec{
 
 		ushort arithProb0;
 	}
-	const uint8*			decodeBuf;
-	const uint8*			decodeBufNext;
-	const uint8*			decodeBufEnd;
+	ubyte*					decodeBuf;
+	ubyte*					decodeBufNext;
+	ubyte*					decodeBufEnd;
 	size_t					decodeBufSize;
 	bool					decodeBufEOF;
 
-	void delegate(size_t numBytesConsumed, void* privateData, const uint8* buf, out size_t bufSize, out bool eofFlag)		decodeNeedBytesFunc;
+	void delegate(size_t numBytesConsumed, void* privateData, const ubyte* buf, out size_t bufSize, out bool eofFlag)		decodeNeedBytesFunc;
 	void*					decodePrivateData;
 	/*Currently disabled*/
 	/*static if(ENABLE_INTEL_INTRINSICS){
@@ -768,7 +786,7 @@ public class SymbolCodec{
 	bool encodeBits(uint bits, uint numBits){
 		assert(mode==Mode.Encoding);
 
-		if (!num_bits)
+		if (!numBits)
 			return true;
 
 		assert((numBits == 32) || (bits <= ((1U << numBits) - 1)));
@@ -785,11 +803,11 @@ public class SymbolCodec{
 		return true;
 	}
 	bool encodeArithInit(){
-		assert(mode == Mode.encoding);
+		assert(mode == Mode.Encoding);
 
 		OutputSymbol sym;
 		sym.bits = 0;
-		sym.numBits = cArithInit;
+		sym.numBits = OutputSymbol.cArithInit;
 		sym.arithProb0 = 0;
 		/*if (!m_output_syms.try_push_back(sym))
 			return false;*/
@@ -798,11 +816,11 @@ public class SymbolCodec{
 		return true;
 	}
 	bool encodeAlignToByte(){
-		LZHAM_ASSERT(m_mode == cEncoding);
+		assert(mode == Mode.Encoding);
 
 		OutputSymbol sym;
 		sym.bits = 0;
-		sym.numBits = cAlignToByteSym;
+		sym.numBits = OutputSymbol.cAlignToByteSym;
 		sym.arithProb0 = 0;
 		/*if (!m_output_syms.try_push_back(sym))
 			return false;*/
@@ -833,7 +851,7 @@ public class SymbolCodec{
 	
 	
 	bool encode(uint bit, AdaptiveBitModel model, bool updateModel = true){
-		assert(m_mode == cEncoding);
+		assert(mode == SymbolCodec.Mode.Encoding);
 
 		arithTotalBits++;
 
@@ -915,8 +933,10 @@ public class SymbolCodec{
 	//typedef void (*need_bytes_func_ptr)(size_t num_bytes_consumed, void *pPrivate_data, const uint8* &pBuf, size_t &buf_size, bool &eof_flag);
 
 	//bool start_decoding(const uint8* pBuf, size_t buf_size, bool eof_flag = true, need_bytes_func_ptr pNeed_bytes_func = NULL, void *pPrivate_data = NULL);
-	bool startDecoding(const uint8* pBuf, size_t bufSize, bool eofFlag = true, 
-							void delegate(size_t numBytesConsumed, void* privateData, const uint8* buf, out size_t bufSize, out bool eofFlag) needBytesFunc, void* privateData = NULL){
+	bool startDecoding(ubyte* pBuf, size_t bufSize, bool eofFlag = true, 
+			void delegate(size_t numBytesConsumed, void* privateData, 
+			const ubyte* buf, out size_t bufSize, out bool eofFlag) needBytesFunc = null, 
+			void* privateData = null){
 		if (!bufSize)
 			return false;
 
@@ -939,7 +959,7 @@ public class SymbolCodec{
 		return true;
 	}
 
-	void decodeSetInputBuffer(const uint8* buf, size_t bufSize, const uint8* bufNext, bool eofFlag){
+	void decodeSetInputBuffer(ubyte* buf, size_t bufSize, ubyte* bufNext, bool eofFlag){
 		decodeBuf = buf;
 		decodeBufNext = bufNext;
 		decodeBufSize = bufSize;
@@ -1041,7 +1061,7 @@ public class SymbolCodec{
 		while(bitCount < (cBitBufSize - 8)){
 			uint c = 0;
 			if(decodeBufNext == decodeBufEnd){
-				if(!m_decode_buf_eof){
+				if(!decodeBufEOF){
 					decodeNeedBytesFunc(decodeBufNext - decodeBuf, decodePrivateData, decodeBuf, decodeBufSize, decodeBufEOF);
 					decodeBufEnd = decodeBuf + decodeBufSize;
 					decodeBufNext = decodeBuf;
@@ -1060,8 +1080,8 @@ public class SymbolCodec{
 		uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 		uint sym, len;
 
-		if (k <= pTables->m_table_max_code){
-			uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+		if (k <= pTables.tableMaxCode){
+			uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 
 			assert(t != uint.max);
 			sym = t & ushort.max;
@@ -1069,23 +1089,23 @@ public class SymbolCodec{
 
 			assert(model.mCodeSizes[sym] == len);
 		}else{
-			len = pTables.mDecodeStartCodeSize;
+			len = pTables.decodeStartCodeSize;
 
 			for ( ; ; ){
-				if (k <= pTables.mMaxCodes[len - 1])
+				if (k <= pTables.maxCodes[len - 1])
 					break;
 				len++;
 			}
 
-			int valPtr = pTables.mValPtrs[len - 1] + cast(int)((bitBuf >> (cBitBufSize - len)));
+			int valPtr = pTables.valPtrs[len - 1] + cast(int)((bitBuf >> (cBitBufSize - len)));
 
-			if ((cast(uint)val_ptr >= model.mTotalSyms)){
+			if ((cast(uint)valPtr >= model.mTotalSyms)){
 				// corrupted stream, or a bug
 				assert(0);
-				return 0;
+				//return 0;
 			}
 
-			sym = pTables.mSortedSymbolOrder[valPtr];
+			sym = pTables.sortedSymbolOrder[valPtr];
 		}
 
 		bitBuf <<= len;
@@ -1093,9 +1113,9 @@ public class SymbolCodec{
 
 		uint freq = model.mSymFreq[sym];
 		freq++;
-		model.mSymFreq[sym] = cas(ushort)(freq);
+		model.mSymFreq[sym] = cast(ushort)(freq);
       
-		assert(freq <= ushort);
+		assert(freq <= ushort.max);
       
 		if (--model.mSymbolsUntilUpdate == 0){
 			totalModelUpdates++;
@@ -1285,8 +1305,8 @@ public class SymbolCodec{
 
 		// Intermix the final Arithmetic, Huffman, or plain bits to a single combined bitstream.
 		// All bits from each source must be output in exactly the same order that the decompressor will read them.
-		for(uint sym_index = 0; sym_index < m_output_syms.size(); sym_index++){
-			const OutputSymbol* sym = &outputSyms[sym_index];
+		for(uint symIndex = 0; symIndex < outputSyms.length; symIndex++){
+			const OutputSymbol* sym = &outputSyms[symIndex];
 
 			if(sym.numBits == OutputSymbol.cAlignToByteSym){
 				if(!putBitsAlignToByte())
@@ -1294,7 +1314,7 @@ public class SymbolCodec{
 			}else if (sym.numBits == OutputSymbol.cArithInit){
 				assert(arithOutputBuf.length);
 
-				if (arithOutputBuf.size()){
+				if (arithOutputBuf.length){
 					arithLength = cSymbolCodecArithMaxLen;
 					arithValue = 0;
 					for(uint i = 0; i < 4; i++){
@@ -1326,7 +1346,7 @@ public class SymbolCodec{
 				}
 
 				//LZHAM_VERIFY(bit == sym.m_bits);
-				assert(bit == sym.m_bits);
+				assert(bit == sym.bits);
 			}else{
 				// Huffman or plain bits
 				if (!putBits(sym.bits, sym.numBits))
@@ -1334,7 +1354,7 @@ public class SymbolCodec{
 			}
 		}
 
-		return flush_bits();
+		return flushBits();
 	}
 
 	uint getBits(uint numBits){
@@ -1348,7 +1368,7 @@ public class SymbolCodec{
 			if(decodeBufNext == decodeBufEnd){
 				if(!decodeBufEOF){
 					decodeNeedBytesFunc(decodeBufNext - decodeBuf, decodePrivateData, decodeBuf, decodeBufSize, decodeBufEOF);
-					decodeBufEOF = decodeBuf + decodeBufSize;
+					decodeBufEnd = decodeBuf + decodeBufSize;
 					decodeBufNext = decodeBuf;
 					if (decodeBufNext < decodeBufEnd) c = *decodeBufNext++;
 				}
@@ -1382,7 +1402,7 @@ public class SymbolCodec{
 		while(bitCount < cast(int)numBits){
 			uint c = 0;
 			if(decodeBufNext == decodeBufEnd){
-				if(!m_decode_buf_eof){
+				if(!decodeBufEOF){
 					decodeNeedBytesFunc(decodeBufNext - decodeBuf, decodePrivateData, decodeBuf, decodeBufSize, decodeBufEOF);
 					decodeBufEnd = decodeBuf + decodeBufSize;
 					decodeBufNext = decodeBuf;

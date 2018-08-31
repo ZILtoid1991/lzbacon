@@ -158,7 +158,7 @@ public class CLZBase : CLZDecompBase{
 		47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47,
 		47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47, 47];
 
-	public @nogc void computeLZXPositionSlot(uint dist, inout uint slot, inout uint ofs){
+	public @nogc void computeLZXPositionSlot(uint dist, out uint slot, out uint ofs){
 		uint s;
 		if (dist < 0x1000)
 			s = mSlotTab0[dist];
@@ -189,12 +189,12 @@ public class CLZBase : CLZDecompBase{
 			assert(slot == i);
 		}
 		
-		for (uint i = 1; i <= (m_dict_size-1); i += 512U*1024U){
+		for (uint i = 1; i <= (dictSize - 1); i += 512U*1024U){
 			computeLZXPositionSlot(i, slot, ofs);
 			assert(i == mLZXPositionBase[slot] + ofs);
 		}
 		
-		computeLZXPositionSlot(m_dict_size - 1, slot, ofs);
-		assert((m_dict_size - 1) == mLZXPositionBase[slot] + ofs);
+		computeLZXPositionSlot(dictSize - 1, slot, ofs);
+		assert((dictSize - 1) == mLZXPositionBase[slot] + ofs);
 	}
 }

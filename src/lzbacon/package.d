@@ -5,3 +5,7 @@
  */
 
 module lzbacon;
+
+public import lzbacon.decompression;
+public import lzbacon.compression;
+public import lzbacon.exceptions;

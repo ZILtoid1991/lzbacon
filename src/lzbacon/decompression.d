@@ -7,6 +7,7 @@ import lzbacon.symbolCodec;
 import lzbacon.prefixCoding;
 import lzbacon.system;
 public import lzbacon.exceptions;
+import lzbacon.checksum;
 
 import core.stdc.stdlib;
 import core.stdc.string;
@@ -27,6 +28,11 @@ static const uint sHugeMatchBaseLen[4] = [ CLZDecompBase.cMaxMatchLen + 1, CLZDe
 static const ubyte sHugeMatchCodeLen[4] = [ 8, 10, 12, 16 ];
 
 public class LZHAMDecompressor : Fiber{
+	static if(CPU_64BIT_CAPABLE){
+		static enum cBitBufSize = 64;
+	}else{
+		static enum cBitBufSize = 32;
+	}
 	int state2;
 	
 	CLZDecompBase lzBase;
@@ -37,7 +43,7 @@ public class LZHAMDecompressor : Fiber{
 	ubyte* decompBuf;
 	uint decompAdler32;
 	
-	const ubyte* inBuf;
+	ubyte* inBuf;
 	size_t* inBufSize;
 	ubyte* outBuf;
 	size_t* outBufSize;
@@ -84,7 +90,7 @@ public class LZHAMDecompressor : Fiber{
 	
 	uint blockType;
 	
-	const ubyte* pFlushSrc;
+	ubyte* pFlushSrc;
 	size_t flushNumBytesRemaining;
 	size_t flushN;
 	
@@ -99,7 +105,7 @@ public class LZHAMDecompressor : Fiber{
 	uint numExtraBits;
 	
 	uint srcOfs;
-	const ubyte* pCopySrc;
+	ubyte* pCopySrc;
 	uint numRawBytesRemaining;
 	
 	//uint m_debug_is_match;
@@ -107,12 +113,12 @@ public class LZHAMDecompressor : Fiber{
 	//uint m_debug_match_dist;
 	//uint m_debug_lit;
 	
-	LZHAMDecompressionStatus m_z_last_status;
+	LZHAMDecompressionStatus lastStatus;
 	uint m_z_first_call;
 	uint m_z_has_flushed;
 	uint m_z_cmf;
 	uint m_z_flg;
-	uint m_z_dict_adler32;
+	uint dictAdler32;
 	
 	uint m_tmp;
 	
@@ -134,22 +140,22 @@ public class LZHAMDecompressor : Fiber{
 		dstHighwaterOfs = 0;
 		
 		inBuf = null;
-		inBufSize = 0;
+		*inBufSize = 0;
 		outBuf = null;
-		outBufSize = 0;
+		*outBufSize = 0;
 		noMoreInputBytesFlag = false;
 		status = LZHAMDecompressionStatus.NOT_FINISHED;
-		origOutBuf = NULL;
+		origOutBuf = null;
 		origOutBufSize = 0;
-		decompAdler32 = cInitAdler32;
+		decompAdler32 = 1;
 		seedBytesToIgnoreWhenFlushing = 0;
 		
-		m_z_last_status = LZHAMDecompressionStatus.NOT_FINISHED;
+		lastStatus = LZHAMDecompressionStatus.NOT_FINISHED;
 		m_z_first_call = 1;
 		m_z_has_flushed = 0;
 		m_z_cmf = 0;
 		m_z_flg = 0;
-		m_z_dict_adler32 = 0;
+		dictAdler32 = 0;
 		
 		m_tmp = 0;
 		
@@ -170,7 +176,7 @@ public class LZHAMDecompressor : Fiber{
 		extraBits = 0;
 		numExtraBits = 0;
 		srcOfs = 0;
-		pCopySrc = NULL;
+		pCopySrc = null;
 		numRawBytesRemaining = 0;
 		
 		codec.clear();
@@ -247,7 +253,7 @@ public class LZHAMDecompressor : Fiber{
 				{
 					while (bitCount < cast(int)(8)){
 						uint r;
-						if (pDecode_buf_next == codec.m_pDecode_buf_end){
+						if (decodeBufNext == codec.decodeBufEnd){
 							if (!codec.decodeBufEOF){
 								//LZHAM_SYMBOL_CODEC_DECODE_END(codec)
 								codec.arithValue = arithValue; 
@@ -304,7 +310,7 @@ public class LZHAMDecompressor : Fiber{
 				{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 					while (bitCount < cast(int)(8)){
 						uint r;
-						if (pDecode_buf_next == codec.m_pDecode_buf_end){
+						if (decodeBufNext == codec.decodeBufEnd){
 							if (!codec.decodeBufEOF){
 								//LZHAM_SYMBOL_CODEC_DECODE_END(codec)
 								codec.arithValue = arithValue; 
@@ -363,17 +369,17 @@ public class LZHAMDecompressor : Fiber{
 				}
 				
 				if (m_z_flg & 32){
-					if ((!m_params.m_pSeed_bytes) || (unbuffered))
+					if ((!params.seedBytes) || (unbuffered))
 						throw new NeedSeedBytesException("Seed bytes not found!");
 					//return LZHAMDecompressionStatus.FAILED_NEED_SEED_BYTES;//LZHAM_DECOMP_STATUS_FAILED_NEED_SEED_BYTES;
-					m_z_dict_adler32 = 0;
+					dictAdler32 = 0;
 					for (m_tmp = 0; m_tmp < 4; ++m_tmp){
 						uint n; 
 						//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, n, 8);
 						{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 							while (bitCount < cast(int)(8)){
 								uint r;
-								if (pDecode_buf_next == codec.m_pDecode_buf_end){
+								if (decodeBufNext == codec.decodeBufEnd){
 									if (!codec.decodeBufEOF){
 										//LZHAM_SYMBOL_CODEC_DECODE_END(codec)
 										codec.arithValue = arithValue; 
@@ -426,9 +432,9 @@ public class LZHAMDecompressor : Fiber{
 							bitBuf <<= (8);
 							bitCount -= (8);
 						}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
-						m_z_dict_adler32 = (m_z_dict_adler32 << 8) | n;
+						dictAdler32 = (dictAdler32 << 8) | n;
 					}
-					if (adler32(params.seedBytes, m_params.m_num_seed_bytes) != m_z_dict_adler32){
+					if (adler32(cast(ubyte*)params.seedBytes, params.numSeedBytes) != dictAdler32){
 						//logger.log("Adler32 error at " ~ to!string(params.seedBytes));
 						/*if(!forceFinish){
 						 return LZHAMDecompressionStatus.FAILED_BAD_SEED_BYTES;
@@ -456,22 +462,22 @@ public class LZHAMDecompressor : Fiber{
 				else if(rate >= LZHAMTableUpdateRate.FASTEST)
 					rate = LZHAMTableUpdateRate.FASTEST;
 				rate--;
-				maxUpdateInterval = gTableUpdateSettings[rate].mMaxUpdateInterval;
-				updateIntervalSlowRate = gTableUpdateSettings[rate].mSlowRate;
+				maxUpdateInterval = gTableUpdateSettings[rate].maxUpdateInterval;
+				updateIntervalSlowRate = gTableUpdateSettings[rate].slowRate;
 			}
-			
-			bool succeeded = litTable.init2(false, 256, maxUpdateInterval, updateIntervalSlowRate, NULL);
+
+			bool succeeded = litTable.init2(false, 256, maxUpdateInterval, updateIntervalSlowRate, null);
 			succeeded = succeeded && deltaLitTable.assign(litTable);
 			
-			succeeded = succeeded && mainTable.init2(false, CLZDecompBase.cLZXNumSpecialLengths + (lzBase.mNumLZXSlots - CLZDecompBase.cLZXLowestUsableMatchSlot) * 8, maxUpdateInterval, updateIntervalSlowRate, NULL);
+			succeeded = succeeded && mainTable.init2(false, CLZDecompBase.cLZXNumSpecialLengths + (lzBase.mNumLZXSlots - CLZDecompBase.cLZXLowestUsableMatchSlot) * 8, maxUpdateInterval, updateIntervalSlowRate, null);
 			
-			succeeded = succeeded && repLenTable[0].init2(false, CLZDecompBase.cNumHugeMatchCodes + (CLZDecompBase.cMaxMatchLen - CLZDecompBase.cMinMatchLen + 1), maxUpdateInterval, updateIntervalSlowRate, NULL);
+			succeeded = succeeded && repLenTable[0].init2(false, CLZDecompBase.cNumHugeMatchCodes + (CLZDecompBase.cMaxMatchLen - CLZDecompBase.cMinMatchLen + 1), maxUpdateInterval, updateIntervalSlowRate, null);
 			succeeded = succeeded && repLenTable[1].assign(repLenTable[0]);
 			
-			succeeded = succeeded && largeLenTable[0].init2(false, CLZDecompBase.cNumHugeMatchCodes + CLZDecompBase.cLZXNumSecondaryLengths, maxUpdateInterval, updateIntervalSlowRate, NULL);
+			succeeded = succeeded && largeLenTable[0].init2(false, CLZDecompBase.cNumHugeMatchCodes + CLZDecompBase.cLZXNumSecondaryLengths, maxUpdateInterval, updateIntervalSlowRate, null);
 			succeeded = succeeded && largeLenTable[1].assign(largeLenTable[0]);
 			
-			succeeded = succeeded && distLsbTable.init2(false, 16, maxUpdateInterval, updateIntervalSlowRate, NULL);
+			succeeded = succeeded && distLsbTable.init2(false, 16, maxUpdateInterval, updateIntervalSlowRate, null);
 			if (!succeeded)
 				throw new LZHAMException("Initialization error!");
 			//return LZHAMDecompressionStatus.FAILED_INITIALIZING;//LZHAM_DECOMP_STATUS_FAILED_INITIALIZING;
@@ -604,7 +610,7 @@ public class LZHAMDecompressor : Fiber{
 				if (m_tmp == 1)
 					resetHuffmanTableUpdateRates();
 				else if (m_tmp == 2)
-					isRep0SingleByteModel();
+					resetAllTables();
 				
 				//LZHAM_SYMBOL_CODEC_DECODE_ALIGN_TO_BYTE(codec);
 				if (bitCount & 7) { //LZHAM_SYMBOL_CODEC_DECODE_ALIGN_TO_BYTE
@@ -734,8 +740,8 @@ public class LZHAMDecompressor : Fiber{
 					codec.bitBuf = bitBuf; 
 					codec.bitCount = bitCount; 
 					codec.decodeBufNext = decodeBufNext;
-					*inBufSize = cast(size_t)(codec.decode_get_bytes_consumed());
-					*origOutBufSize = 0;
+					*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
+					origOutBufSize = 0;
 					//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_BAD_SYNC_BLOCK); }
 					//again this coroutine...
 				}
@@ -805,7 +811,7 @@ public class LZHAMDecompressor : Fiber{
 					codec.bitCount = bitCount; 
 					codec.decodeBufNext = decodeBufNext;
 					*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
-					*origOutBufSize = 0;
+					origOutBufSize = 0;
 					//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_BAD_SYNC_BLOCK); }
 					//yet again...
 					import std.conv;
@@ -847,13 +853,13 @@ public class LZHAMDecompressor : Fiber{
 									size_t helperValue = flushN - copyOfs;
 									size_t bytesToCopy = helperValue > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
 									//LZHAM_MIN((size_t)(m_flush_n - copyOfs), cBytesToMemCpyPerIteration);  
-									memcpy(m_pOut_buf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
-									decompAdler32 = adler32(pFlushSrc + copyOfs, bytesToCopy, decompAdler32);  
+									memcpy(outBuf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
+									decompAdler32 = adler32(cast(ubyte*)(pFlushSrc + copyOfs), bytesToCopy, decompAdler32);  
 									copyOfs += bytesToCopy;  
 								}  
 							} 
 							*inBufSize = cast(size_t)(this.codec.decodeGetBytesConsumed());
-							*outBufSize = flushN;
+							outBufSize = flushN;
 							//LZHAM_CR_RETURN(m_state, m_flush_n ? LZHAM_DECOMP_STATUS_NOT_FINISHED : LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT);
 							this.codec.decodeSetInputBuffer(inBuf, *inBufSize, inBuf, noMoreInputBytesFlag);
 							pFlushSrc += flushN;
@@ -876,7 +882,7 @@ public class LZHAMDecompressor : Fiber{
 						
 						// unbuffered, or dst_ofs==0
 						*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
-						*outBufSize = dstOfs - dstHighwaterOfs;
+						*this.outBufSize = dstOfs - dstHighwaterOfs;
 						
 						// Partial/sync flushes in unbuffered mode details:
 						// We assume the caller doesn't move the output buffer between calls AND the pointer to the output buffer input parameter won't change between calls (i.e.
@@ -909,7 +915,7 @@ public class LZHAMDecompressor : Fiber{
 					while (bitCount < cast(int)(24)){
 						uint r;
 						if (decodeBufNext == codec.decodeBufEnd){
-							if (!codec.decodeBufEOF, 1){
+							if (!codec.decodeBufEOF){
 								//LZHAM_SYMBOL_CODEC_DECODE_END(codec)
 								codec.arithValue = arithValue; 
 								codec.arithLength = arithLength; 
@@ -968,7 +974,7 @@ public class LZHAMDecompressor : Fiber{
 					while (bitCount < cast(int)(8)){
 						uint r;
 						if (decodeBufNext == codec.decodeBufEnd){
-							if (!codec.decodeBufEOF, 1){
+							if (!codec.decodeBufEOF){
 								//LZHAM_SYMBOL_CODEC_DECODE_END(codec)
 								codec.arithValue = arithValue; 
 								codec.arithLength = arithLength; 
@@ -1033,7 +1039,7 @@ public class LZHAMDecompressor : Fiber{
 					codec.bitCount = bitCount; 
 					codec.decodeBufNext = decodeBufNext;
 					*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
-					*outBufSize = 0;
+					*this.outBufSize = 0;
 					//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_BAD_RAW_BLOCK); }
 					yieldAndThrow(new BadRawBlockException(decodeBufNext));
 				}
@@ -1120,7 +1126,7 @@ public class LZHAMDecompressor : Fiber{
 							codec.bitCount = bitCount; 
 							codec.decodeBufNext = decodeBufNext;
 							*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
-							*outBufSize = 0;
+							outBufSize = 0;
 							//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_DEST_BUF_TOO_SMALL); }
 							yieldAndThrow(new OutputBufferTooSmallException("Destination buffer is too small!"));
 						}
@@ -1160,13 +1166,13 @@ public class LZHAMDecompressor : Fiber{
 										size_t helperValue = flushN - copyOfs;
 										size_t bytesToCopy = helperValue > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
 										//LZHAM_MIN((size_t)(m_flush_n - copyOfs), cBytesToMemCpyPerIteration);  
-										memcpy(m_pOut_buf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
+										memcpy(this.outBuf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
 										decompAdler32 = adler32(pFlushSrc + copyOfs, bytesToCopy, decompAdler32);  
 										copyOfs += bytesToCopy;  
 									}  
 								} 
 								*inBufSize = cast(size_t)(this.codec.decodeGetBytesConsumed());
-								*outBufSize = flushN;
+								*(this.outBufSize) = flushN;
 								//LZHAM_CR_RETURN(m_state, m_flush_n ? LZHAM_DECOMP_STATUS_NOT_FINISHED : LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT);
 								if(flushN){
 									status = LZHAMDecompressionStatus.NOT_FINISHED;
@@ -1193,7 +1199,7 @@ public class LZHAMDecompressor : Fiber{
 							bitCount = codec.bitCount; 
 							decodeBufNext = codec.decodeBufNext;
 							
-							dst_ofs = 0;
+							dstOfs = 0;
 						}
 					}
 					
@@ -1215,7 +1221,7 @@ public class LZHAMDecompressor : Fiber{
 					while (!inBufRemaining){
 						// We need more bytes from the caller.
 						*inBufSize = cast(size_t)(inBufOfs);
-						*outBufSize = 0;
+						outBufSize = 0;
 						if(noMoreInputBytesFlag){
 							yieldAndThrow(new LZHAMException("Decompressor needs more bytes!"));
 						}
@@ -1247,7 +1253,7 @@ public class LZHAMDecompressor : Fiber{
 						if (((dstOfs + numBytesToCopy) > outBufSize)){
 							// Output buffer is not large enough.
 							*inBufSize = cast(size_t)(inBufOfs);
-							*outBufSize = 0;
+							outBufSize = 0;
 							//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_DEST_BUF_TOO_SMALL); }
 							yieldAndThrow(new OutputBufferTooSmallException("Destination buffer is too small!"));
 						}
@@ -1292,13 +1298,13 @@ public class LZHAMDecompressor : Fiber{
 									size_t helperValue = flushN - copyOfs;
 									size_t bytesToCopy = helperValue > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
 									//LZHAM_MIN((size_t)(m_flush_n - copyOfs), cBytesToMemCpyPerIteration);  
-									memcpy(m_pOut_buf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
+									memcpy(outBuf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
 									decompAdler32 = adler32(pFlushSrc + copyOfs, bytesToCopy, decompAdler32);  
 									copyOfs += bytesToCopy;  
 								}  
 							} 
 							*inBufSize = cast(size_t)(this.codec.decodeGetBytesConsumed());
-							*outBufSize = flushN;
+							*this.outBufSize = flushN;
 							//LZHAM_CR_RETURN(m_state, m_flush_n ? LZHAM_DECOMP_STATUS_NOT_FINISHED : LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT);
 							status = LZHAMDecompressionStatus.HAS_MORE_OUTPUT;
 							yield();
@@ -1497,7 +1503,8 @@ public class LZHAMDecompressor : Fiber{
 						AdaptiveBitModel pModel;
 						pModel = isMatchModel[matchModelIndex];//pModel = &model;
 						while (arithLength < cSymbolCodecArithMinLen){
-							uint c; codec.m_pSaved_model = pModel;
+							uint c; 
+							codec.savedModel = cast(void*)(&pModel);
 							//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, c, 8);
 							{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 								while (bitCount < cast(int)(8)){
@@ -1551,11 +1558,11 @@ public class LZHAMDecompressor : Fiber{
 									bitCount += 8;// DO NOT TOUCH THIS!
 									bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 								}
-								blockFlushType = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
+								isMatchBit = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
 								bitBuf <<= (8);
 								bitCount -= (8);
 							}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
-							pModel = cast(AdaptiveBitModel*)(codec.savedModel);
+							pModel = *cast(AdaptiveBitModel*)(codec.savedModel);
 							arithValue = (arithValue << 8) | c;
 							arithLength <<= 8;
 						}
@@ -1593,8 +1600,8 @@ public class LZHAMDecompressor : Fiber{
 								codec.bitBuf = bitBuf; 
 								codec.bitCount = bitCount; 
 								codec.decodeBufNext = decodeBufNext;
-								*inBufSize = cast(size_t)(codec.decode_get_bytes_consumed());
-								*outBufSize = 0;
+								*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
+								*this.outBufSize = 0;
 								//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_DEST_BUF_TOO_SMALL); }
 								yieldAndThrow(new OutputBufferTooSmallException("Destination buffer is too small!"));
 							}
@@ -1609,12 +1616,12 @@ public class LZHAMDecompressor : Fiber{
 								QuasiAdaptiveHuffmanDataModel pModel; 
 								DecoderTables pTables;
 								pModel = litTable; //pModel = &model; 
-								pTables = model.m_pDecodeTables;
+								pTables = litTable.m_pDecodeTables;
 								if (bitCount < 24){
 									uint c;
-									decodeBufNext += sizeof(uint32);
+									decodeBufNext += uint.sizeof;
 									if (decodeBufNext >= codec.decodeBufEnd){
-										decodeBufNext -= sizeof(uint32);
+										decodeBufNext -= uint.sizeof;
 										while (bitCount < 24){
 											if (!codec.decodeBufEOF){
 												codec.savedHuffModel = pModel;
@@ -1675,20 +1682,20 @@ public class LZHAMDecompressor : Fiber{
 								}
 								uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 								uint len;
-								if (k <= pTables.mTableMaxCode){
-									uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+								if (k <= pTables.tableMaxCode){
+									uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 									r = t & ushort.max;//result = t & ushort.max;
 									len = t >> 16;
 								}else{
-									len = pTables.mDecodeStartCodeSize;
+									len = pTables.decodeStartCodeSize;
 									for ( ; ; ){
-										if (k <= pTables.mMaxCodes[len - 1])
+										if (k <= pTables.maxCodes[len - 1])
 											break;
 										len++;
 									}
-									int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+									int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 									if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-									r = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+									r = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 								}
 								bitBuf <<= len;
 								bitCount -= len;
@@ -1700,7 +1707,7 @@ public class LZHAMDecompressor : Fiber{
 									pModel.updateTables();
 								}
 							}//LZHAM_SYMBOL_CODEC_DECODE_ADAPTIVE_HUFFMAN END
-							pDst[dstOfs] = cast(uint8)(r);
+							pDst[dstOfs] = cast(ubyte)(r);
 							
 							//#ifdef LZHAM_LZDEBUG
 							debug{
@@ -1735,12 +1742,12 @@ public class LZHAMDecompressor : Fiber{
 								QuasiAdaptiveHuffmanDataModel pModel; 
 								DecoderTables pTables;
 								pModel = deltaLitTable; //pModel = &model; 
-								pTables = model.m_pDecodeTables;
+								pTables = deltaLitTable.m_pDecodeTables;
 								if (bitCount < 24){
 									uint c;
-									decodeBufNext += sizeof(uint32);
+									decodeBufNext += uint.sizeof;
 									if (decodeBufNext >= codec.decodeBufEnd){
-										decodeBufNext -= sizeof(uint32);
+										decodeBufNext -= uint.sizeof;
 										while (bitCount < 24){
 											if (!codec.decodeBufEOF){
 												codec.savedHuffModel = pModel;
@@ -1801,20 +1808,20 @@ public class LZHAMDecompressor : Fiber{
 								}
 								uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 								uint len;
-								if (k <= pTables.mTableMaxCode){
-									uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+								if (k <= pTables.tableMaxCode){
+									uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 									r = t & ushort.max;//result = t & ushort.max;
 									len = t >> 16;
 								}else{
-									len = pTables.mDecodeStartCodeSize;
+									len = pTables.decodeStartCodeSize;
 									for ( ; ; ){
-										if (k <= pTables.mMaxCodes[len - 1])
+										if (k <= pTables.maxCodes[len - 1])
 											break;
 										len++;
 									}
-									int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+									int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 									if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-									r = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+									r = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 								}
 								bitBuf <<= len;
 								bitCount -= len;
@@ -1872,13 +1879,13 @@ public class LZHAMDecompressor : Fiber{
 											size_t helperValue = flushN - copyOfs;
 											size_t bytesToCopy = helperValue > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
 											//LZHAM_MIN((size_t)(m_flush_n - copyOfs), cBytesToMemCpyPerIteration);  
-											memcpy(m_pOut_buf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
+											memcpy(this.outBuf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
 											decompAdler32 = adler32(pFlushSrc + copyOfs, bytesToCopy, decompAdler32);  
 											copyOfs += bytesToCopy;  
 										}  
 									} 
 									*inBufSize = cast(size_t)(this.codec.decodeGetBytesConsumed());
-									*outBufSize = flushN;
+									*this.outBufSize = flushN;
 									//LZHAM_CR_RETURN(m_state, m_flush_n ? LZHAM_DECOMP_STATUS_NOT_FINISHED : LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT);
 									status = LZHAMDecompressionStatus.HAS_MORE_OUTPUT;
 									yield();
@@ -1915,7 +1922,7 @@ public class LZHAMDecompressor : Fiber{
 							AdaptiveBitModel *pModel;
 							pModel = &isRepModel[curState];//pModel = &model;
 							while (arithLength < cSymbolCodecArithMinLen){
-								uint c; codec.m_pSaved_model = pModel;
+								uint c; codec.savedModel = pModel;
 								//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, c, 8);
 								{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 									while (bitCount < cast(int)(8)){
@@ -1969,7 +1976,7 @@ public class LZHAMDecompressor : Fiber{
 										bitCount += 8;// DO NOT TOUCH THIS!
 										bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 									}
-									blockFlushType = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
+									c = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
 									bitBuf <<= (8);
 									bitCount -= (8);
 								}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
@@ -1995,7 +2002,7 @@ public class LZHAMDecompressor : Fiber{
 								AdaptiveBitModel *pModel;
 								pModel = &isRep0Model[curState];//pModel = &model;
 								while (arithLength < cSymbolCodecArithMinLen){
-									uint c; codec.m_pSaved_model = pModel;
+									uint c; codec.savedModel = pModel;
 									//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, c, 8);
 									{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 										while (bitCount < cast(int)(8)){
@@ -2049,7 +2056,7 @@ public class LZHAMDecompressor : Fiber{
 											bitCount += 8;// DO NOT TOUCH THIS!
 											bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 										}
-										blockFlushType = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
+										c = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
 										bitBuf <<= (8);
 										bitCount -= (8);
 									}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
@@ -2075,7 +2082,7 @@ public class LZHAMDecompressor : Fiber{
 									AdaptiveBitModel *pModel;
 									pModel = &isRep0SingleByteModel[curState];//pModel = &model;
 									while (arithLength < cSymbolCodecArithMinLen){
-										uint c; codec.m_pSaved_model = pModel;
+										uint c; codec.savedModel = pModel;
 										//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, c, 8);
 										{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 											while (bitCount < cast(int)(8)){
@@ -2129,7 +2136,7 @@ public class LZHAMDecompressor : Fiber{
 												bitCount += 8;// DO NOT TOUCH THIS!
 												bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 											}
-											blockFlushType = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
+											c = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
 											bitBuf <<= (8);
 											bitCount -= (8);
 										}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
@@ -2157,12 +2164,12 @@ public class LZHAMDecompressor : Fiber{
 										QuasiAdaptiveHuffmanDataModel pModel; 
 										DecoderTables pTables;
 										pModel = repLenTable[curState >= CLZDecompBase.cNumLitStates]; //pModel = &model; 
-										pTables = model.m_pDecodeTables;
+										pTables = repLenTable[curState >= CLZDecompBase.cNumLitStates].m_pDecodeTables;
 										if (bitCount < 24){
 											uint c;
-											decodeBufNext += sizeof(uint32);
+											decodeBufNext += uint.sizeof;
 											if (decodeBufNext >= codec.decodeBufEnd){
-												decodeBufNext -= sizeof(uint32);
+												decodeBufNext -= uint.sizeof;
 												while (bitCount < 24){
 													if (!codec.decodeBufEOF){
 														codec.savedHuffModel = pModel;
@@ -2223,20 +2230,20 @@ public class LZHAMDecompressor : Fiber{
 										}
 										uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 										uint len;
-										if (k <= pTables.mTableMaxCode){
-											uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+										if (k <= pTables.tableMaxCode){
+											uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 											matchLen = t & ushort.max;//result = t & ushort.max;
 											len = t >> 16;
 										}else{
-											len = pTables.mDecodeStartCodeSize;
+											len = pTables.decodeStartCodeSize;
 											for ( ; ; ){
-												if (k <= pTables.mMaxCodes[len - 1])
+												if (k <= pTables.maxCodes[len - 1])
 													break;
 												len++;
 											}
-											int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+											int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 											if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-											matchLen = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+											matchLen = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 										}
 										bitBuf <<= len;
 										bitCount -= len;
@@ -2386,12 +2393,12 @@ public class LZHAMDecompressor : Fiber{
 									QuasiAdaptiveHuffmanDataModel pModel; 
 									DecoderTables pTables;
 									pModel = repLenTable[curState >= CLZDecompBase.cNumLitStates]; //pModel = &model; 
-									pTables = model.m_pDecodeTables;
+									pTables = repLenTable[curState >= CLZDecompBase.cNumLitStates].m_pDecodeTables;
 									if (bitCount < 24){
 										uint c;
-										decodeBufNext += sizeof(uint32);
+										decodeBufNext += uint.sizeof;
 										if (decodeBufNext >= codec.decodeBufEnd){
-											decodeBufNext -= sizeof(uint32);
+											decodeBufNext -= uint.sizeof;
 											while (bitCount < 24){
 												if (!codec.decodeBufEOF){
 													codec.savedHuffModel = pModel;
@@ -2452,20 +2459,20 @@ public class LZHAMDecompressor : Fiber{
 									}
 									uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 									uint len;
-									if (k <= pTables.mTableMaxCode){
-										uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+									if (k <= pTables.tableMaxCode){
+										uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 										matchLen = t & ushort.max;//result = t & ushort.max;
 										len = t >> 16;
 									}else{
-										len = pTables.mDecodeStartCodeSize;
+										len = pTables.decodeStartCodeSize;
 										for ( ; ; ){
-											if (k <= pTables.mMaxCodes[len - 1])
+											if (k <= pTables.maxCodes[len - 1])
 												break;
 											len++;
 										}
-										int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+										int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 										if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-										matchLen = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+										matchLen = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 									}
 									bitBuf <<= len;
 									bitCount -= len;
@@ -2612,7 +2619,7 @@ public class LZHAMDecompressor : Fiber{
 									AdaptiveBitModel *pModel;
 									pModel = &isRep1Model[curState];//pModel = &model;
 									while (arithLength < cSymbolCodecArithMinLen){
-										uint c; codec.m_pSaved_model = pModel;
+										uint c; codec.savedModel = pModel;
 										//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, c, 8);
 										{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 											while (bitCount < cast(int)(8)){
@@ -2666,7 +2673,7 @@ public class LZHAMDecompressor : Fiber{
 												bitCount += 8;// DO NOT TOUCH THIS!
 												bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 											}
-											blockFlushType = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
+											c = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
 											bitBuf <<= (8);
 											bitCount -= (8);
 										}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
@@ -2696,7 +2703,7 @@ public class LZHAMDecompressor : Fiber{
 										AdaptiveBitModel *pModel;
 										pModel = &isRep2Model[curState];//pModel = &model;
 										while (arithLength < cSymbolCodecArithMinLen){
-											uint c; codec.m_pSaved_model = pModel;
+											uint c; codec.savedModel = pModel;
 											//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS(codec, c, 8);
 											{//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 												while (bitCount < cast(int)(8)){
@@ -2750,7 +2757,7 @@ public class LZHAMDecompressor : Fiber{
 													bitCount += 8;// DO NOT TOUCH THIS!
 													bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 												}
-												blockFlushType = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
+												c = (8) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (8))) : 0;
 												bitBuf <<= (8);
 												bitCount -= (8);
 											}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
@@ -2797,12 +2804,12 @@ public class LZHAMDecompressor : Fiber{
 								QuasiAdaptiveHuffmanDataModel pModel; 
 								DecoderTables pTables;
 								pModel = mainTable; //pModel = &model; 
-								pTables = model.m_pDecodeTables;
+								pTables = mainTable.m_pDecodeTables;
 								if (bitCount < 24){
 									uint c;
-									decodeBufNext += sizeof(uint32);
+									decodeBufNext += uint.sizeof;
 									if (decodeBufNext >= codec.decodeBufEnd){
-										decodeBufNext -= sizeof(uint32);
+										decodeBufNext -= uint.sizeof;
 										while (bitCount < 24){
 											if (!codec.decodeBufEOF){
 												codec.savedHuffModel = pModel;
@@ -2863,20 +2870,20 @@ public class LZHAMDecompressor : Fiber{
 								}
 								uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 								uint len;
-								if (k <= pTables.mTableMaxCode){
-									uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+								if (k <= pTables.tableMaxCode){
+									uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 									sym = t & ushort.max;//result = t & ushort.max;
 									len = t >> 16;
 								}else{
-									len = pTables.mDecodeStartCodeSize;
+									len = pTables.decodeStartCodeSize;
 									for ( ; ; ){
-										if (k <= pTables.mMaxCodes[len - 1])
+										if (k <= pTables.maxCodes[len - 1])
 											break;
 										len++;
 									}
-									int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+									int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 									if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-									sym = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+									sym = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 								}
 								bitBuf <<= len;
 								bitCount -= len;
@@ -2925,12 +2932,12 @@ public class LZHAMDecompressor : Fiber{
 									QuasiAdaptiveHuffmanDataModel pModel; 
 									DecoderTables pTables;
 									pModel = largeLenTable[curState >= CLZDecompBase.cNumLitStates]; //pModel = &model; 
-									pTables = model.m_pDecodeTables;
+									pTables = largeLenTable[curState >= CLZDecompBase.cNumLitStates].m_pDecodeTables;
 									if (bitCount < 24){
 										uint c;
-										decodeBufNext += sizeof(uint32);
+										decodeBufNext += uint.sizeof;
 										if (decodeBufNext >= codec.decodeBufEnd){
-											decodeBufNext -= sizeof(uint32);
+											decodeBufNext -= uint.sizeof;
 											while (bitCount < 24){
 												if (!codec.decodeBufEOF){
 													codec.savedHuffModel = pModel;
@@ -2991,20 +2998,20 @@ public class LZHAMDecompressor : Fiber{
 									}
 									uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 									uint len;
-									if (k <= pTables.mTableMaxCode){
-										uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+									if (k <= pTables.tableMaxCode){
+										uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 										e = t & ushort.max;//result = t & ushort.max;
 										len = t >> 16;
 									}else{
-										len = pTables.mDecodeStartCodeSize;
+										len = pTables.decodeStartCodeSize;
 										for ( ; ; ){
-											if (k <= pTables.mMaxCodes[len - 1])
+											if (k <= pTables.maxCodes[len - 1])
 												break;
 											len++;
 										}
-										int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+										int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 										if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-										e = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+										e = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 									}
 									bitBuf <<= len;
 									bitCount -= len;
@@ -3289,12 +3296,12 @@ public class LZHAMDecompressor : Fiber{
 									QuasiAdaptiveHuffmanDataModel pModel; 
 									DecoderTables pTables;
 									pModel = distLsbTable; //pModel = &model; 
-									pTables = model.m_pDecodeTables;
+									pTables = distLsbTable.m_pDecodeTables;
 									if (bitCount < 24){
 										uint c;
-										decodeBufNext += sizeof(uint32);
+										decodeBufNext += uint.sizeof;
 										if (decodeBufNext >= codec.decodeBufEnd){
-											decodeBufNext -= sizeof(uint32);
+											decodeBufNext -= uint.sizeof;
 											while (bitCount < 24){
 												if (!codec.decodeBufEOF){
 													codec.savedHuffModel = pModel;
@@ -3355,20 +3362,20 @@ public class LZHAMDecompressor : Fiber{
 									}
 									uint k = cast(uint)((bitBuf >> (cBitBufSize - 16)) + 1);
 									uint len;
-									if (k <= pTables.mTableMaxCode){
-										uint32 t = pTables.mLookup[bitBuf >> (cBitBufSize - pTables.mTableBits)];
+									if (k <= pTables.tableMaxCode){
+										uint t = pTables.lookup[bitBuf >> (cBitBufSize - pTables.tableBits)];
 										j = t & ushort.max;//result = t & ushort.max;
 										len = t >> 16;
 									}else{
-										len = pTables.mDecodeStartCodeSize;
+										len = pTables.decodeStartCodeSize;
 										for ( ; ; ){
-											if (k <= pTables.mMaxCodes[len - 1])
+											if (k <= pTables.maxCodes[len - 1])
 												break;
 											len++;
 										}
-										int valPtr = pTables.mValPtrs[len - 1] + cast(int)(bit_buf >> (cBitBufSize - len));
+										int valPtr = pTables.valPtrs[len - 1] + cast(int)(bitBuf >> (cBitBufSize - len));
 										if ((cast(uint)valPtr >= pModel.mTotalSyms)) valPtr = 0;
-										j = pTables.mSortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
+										j = pTables.sortedSymbolOrder[valPtr];//result = pTables.mSortedSymbolOrder[valPtr];
 									}
 									bitBuf <<= len;
 									bitCount -= len;
@@ -3408,7 +3415,7 @@ public class LZHAMDecompressor : Fiber{
 						}
 						//#endif
 						static if(unbuffered){
-							if ( (unbuffered) && ((cast(size_t)matchHist0 > dst_ofs) || ((dstOfs + matchLen) > outBufSize)) ){
+							if ( (unbuffered) && ((cast(size_t)matchHist0 > dstOfs) || ((dstOfs + matchLen) > outBufSize)) ){
 								//LZHAM_SYMBOL_CODEC_DECODE_END(codec);
 								codec.arithValue = arithValue; 
 								codec.arithLength = arithLength; 
@@ -3416,15 +3423,15 @@ public class LZHAMDecompressor : Fiber{
 								codec.bitCount = bitCount; 
 								codec.decodeBufNext = decodeBufNext;
 								*inBufSize = cast(size_t)(codec.decodeGetBytesConsumed());
-								*outBufSize = 0;
+								*this.outBufSize = 0;
 								//for ( ; ; ) { LZHAM_CR_RETURN(m_state, LZHAM_DECOMP_STATUS_FAILED_BAD_CODE); }
 								yieldAndThrow(new LZHAMException("Bad code!"));
 							}
 						}
 						
 						uint srcOfs;
-						const uint8* copySrc;
-						srcOfs = (dst_ofs - matchHist0) & dictSizeMask;
+						ubyte* copySrc;
+						srcOfs = (dstOfs - matchHist0) & dictSizeMask;
 						copySrc = pDst + srcOfs;
 						
 						//#undef LZHAM_SAVE_LOCAL_STATE
@@ -3470,16 +3477,16 @@ public class LZHAMDecompressor : Fiber{
 												size_t copyOfs = 0;
 												while (copyOfs < flushN){
 													const uint cBytesToMemCpyPerIteration = 8192U;
-													size_t helperValue = flushN - copyOfs;
-													size_t bytesToCopy = helperValue > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
+													size_t helperValue0 = flushN - copyOfs;
+													size_t bytesToCopy = helperValue0 > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
 													//LZHAM_MIN((size_t)(m_flush_n - copyOfs), cBytesToMemCpyPerIteration);  
-													memcpy(m_pOut_buf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
+													memcpy(outBuf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
 													decompAdler32 = adler32(pFlushSrc + copyOfs, bytesToCopy, decompAdler32);  
 													copyOfs += bytesToCopy;  
 												}  
 											} 
 											*inBufSize = cast(size_t)(this.codec.decodeGetBytesConsumed());
-											*outBufSize = flushN;
+											*this.outBufSize = flushN;
 											//LZHAM_CR_RETURN(m_state, m_flush_n ? LZHAM_DECOMP_STATUS_NOT_FINISHED : LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT);
 											status = LZHAMDecompressionStatus.HAS_MORE_OUTPUT;
 											yield();
@@ -3507,10 +3514,10 @@ public class LZHAMDecompressor : Fiber{
 									matchLen--;
 								} while (matchLen > 0);
 							}else{
-								uint8* copyDst = pDst + dstOfs;
+								ubyte* copyDst = pDst + dstOfs;
 								if (matchHist0 == 1){
 									// Handle byte runs.
-									uint8 c = *copySrc;
+									ubyte c = *copySrc;
 									if (matchLen < 8){
 										for (int i = matchLen; i > 0; i--)
 											*copyDst++ = c;
@@ -3646,13 +3653,13 @@ public class LZHAMDecompressor : Fiber{
 						size_t helperValue = flushN - copyOfs;
 						size_t bytesToCopy = helperValue > cBytesToMemCpyPerIteration ? cBytesToMemCpyPerIteration : helperValue;
 						//LZHAM_MIN((size_t)(m_flush_n - copyOfs), cBytesToMemCpyPerIteration);  
-						memcpy(m_pOut_buf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
+						memcpy(outBuf + copyOfs, pFlushSrc + copyOfs, bytesToCopy);
 						decompAdler32 = adler32(pFlushSrc + copyOfs, bytesToCopy, decompAdler32);  
 						copyOfs += bytesToCopy;  
 					}  
 				} 
 				*inBufSize = cast(size_t)(this.codec.decodeGetBytesConsumed());
-				*outBufSize = flushN;
+				*this.outBufSize = flushN;
 				//LZHAM_CR_RETURN(m_state, m_flush_n ? LZHAM_DECOMP_STATUS_NOT_FINISHED : LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT);
 				status = LZHAMDecompressionStatus.HAS_MORE_OUTPUT;
 				yield();
@@ -3790,15 +3797,15 @@ public class LZHAMDecompressor : Fiber{
 					bitCount += 8;// DO NOT TOUCH THIS!
 					bitBuf |= (cast(size_t)(r) << (SymbolCodec.cBitBufSize - bitCount));// DO NOT TOUCH THIS!
 				}
-				endSyncMarker = (16) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (16))) : 0;
+				l = (16) ? cast(uint)(bitBuf >> (SymbolCodec.cBitBufSize - (16))) : 0;
 				bitBuf <<= (16);
 				bitCount -= (16);
 			}//LZHAM_SYMBOL_CODEC_DECODE_GET_BITS
 			fileSrcFileAdler32 = (fileSrcFileAdler32 << 16) | l;
 			
-			if (m_params.m_decompress_flags & LZHAMDecompressFlags.COMPUTE_ADLER32){
+			if (params.decompressFlags & LZHAMDecompressFlags.COMPUTE_ADLER32){
 				static if (unbuffered){
-					decompAdler32 = adler32(pDst, dst_ofs, cInitAdler32);
+					decompAdler32 = adler32(pDst, dstOfs);
 				}
 				
 				if (fileSrcFileAdler32 != decompAdler32){
@@ -3807,7 +3814,7 @@ public class LZHAMDecompressor : Fiber{
 			}
 			else
 			{
-				m_decomp_adler32 = fileSrcFileAdler32;
+				decompAdler32 = fileSrcFileAdler32;
 			}
 		}
 		
@@ -3819,7 +3826,7 @@ public class LZHAMDecompressor : Fiber{
 		codec.decodeBufNext = decodeBufNext;
 		
 		*inBufSize = cast(size_t)(codec.stopDecoding());
-		*outBufSize = unbuffered ? (dstOfs - dstHighwaterOfs) : 0;
+		*this.outBufSize = unbuffered ? (dstOfs - dstHighwaterOfs) : 0;
 		dstHighwaterOfs = dstOfs;
 		
 		//LZHAM_CR_RETURN(m_state, m_status);
@@ -3869,10 +3876,10 @@ public class LZHAMDecompressor : Fiber{
 		resetArithTables;
 	}
 	void resetHuffmanTableUpdateRates(){
-		litTable.reset_update_rate();
-		deltaLitTable.reset_update_rate();
+		litTable.resetUpdateRate();
+		deltaLitTable.resetUpdateRate();
 		
-		mainTable.reset_update_rate();
+		mainTable.resetUpdateRate();
 		
 		for (uint i = 0; i < repLenTable.length; i++)
 			repLenTable[i].resetUpdateRate();
@@ -3905,20 +3912,20 @@ public LZHAMDecompressor decompressInit(LZHAMDecompressionParameters* params){
 		return null;
 	
 	LZHAMDecompressor decompressor;
-	
+
 	//pState->m_params = *pParams;
 	
 	if (params.decompressFlags & LZHAMDecompressFlags.OUTPUT_UNBUFFERED){
 		decompressor = new LZHAMDecompressor(true);
 		decompressor.params = *params;
-		decompressor.rawDecompBuf = NULL;
+		decompressor.rawDecompBuf = null;
 		decompressor.rawDecompBufSize = 0;
-		decompressor.decompBuf = NULL;
+		decompressor.decompBuf = null;
 	}else{
 		decompressor = new LZHAMDecompressor(false);
 		decompressor.params = *params;
 		uint decompBufSize = 1U << decompressor.params.dictSizeLog2;
-		decompressor.rawDecompBuff = cast(ubyte*)(malloc(decompBufSize + 15));
+		decompressor.rawDecompBuf = cast(ubyte*)(malloc(decompBufSize + 15));
 		/*if (!pState->m_pRaw_decomp_buf)
 		{
 			lzham_delete(pState);
@@ -3934,7 +3941,7 @@ public LZHAMDecompressor decompressInit(LZHAMDecompressionParameters* params){
 }
 public LZHAMDecompressor decompressReinit(LZHAMDecompressor decompressor, LZHAMDecompressionParameters* params){
 	if (!decompressor)
-		return lzham_lib_decompress_init(params);
+		return decompressInit(params);
 	
 	LZHAMDecompressor decomp2 = decompressor;
 
@@ -3947,10 +3954,10 @@ public LZHAMDecompressor decompressReinit(LZHAMDecompressor decompressor, LZHAMD
 		decomp2.rawDecompBufSize = 0;
 		decomp2.decompBuf = null;
 	}else{
-		uint32 newDictSize = 1U << decomp2.params.dictSizeLog2;
-		if ((!decomp2->m_pRaw_decomp_buf) || (decomp2->m_raw_decomp_buf_size < newDictSize))
+		uint newDictSize = 1U << decomp2.params.dictSizeLog2;
+		if ((!decomp2.rawDecompBuf) || (decomp2.rawDecompBufSize < newDictSize))
 		{
-			uint8 *pNewDict = cast(ubyte*)(realloc(decomp2.rawDecompBuf, newDictSize + 15));
+			ubyte *pNewDict = cast(ubyte*)(realloc(decomp2.rawDecompBuf, newDictSize + 15));
 			if (!pNewDict)
 				return null;
 			decomp2.rawDecompBuf = pNewDict;
@@ -3959,12 +3966,12 @@ public LZHAMDecompressor decompressReinit(LZHAMDecompressor decompressor, LZHAMD
 		}
 	}
 	
-	decomp2.m_params = *pParams;
+	decomp2.params = *params;
 	
 	decomp2.init();
 	
 	decomp2.resetArithTables();
-	return pState;
+	return decompressor;
 }
 public uint decompressDeinit(LZHAMDecompressor decompressor){
 	if(decompressor is null)
@@ -3972,7 +3979,7 @@ public uint decompressDeinit(LZHAMDecompressor decompressor){
 	free(decompressor.rawDecompBuf);
 	return decompressor.decompAdler32;
 }
-public LZHAMDecompressionStatus decompress(LZHAMDecompressor decompressor, const ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, size_t* outBufSize, bool noMoreInputBytesFlag){
+public LZHAMDecompressionStatus decompress(LZHAMDecompressor decompressor, ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, size_t* outBufSize, bool noMoreInputBytesFlag){
 	if ((decompressor is null) || (!decompressor.params.dictSizeLog2) || (!inBufSize) || (!outBufSize)){
 		return LZHAMDecompressionStatus.INVALID_PARAMETER;
 	}
@@ -4016,7 +4023,7 @@ public LZHAMDecompressionStatus decompress(LZHAMDecompressor decompressor, const
 
 	return decompressor.status;
 }
-public LZHAMDecompressionStatus decompressMem(LZHAMDecompressionParameters pParams, ubyte* destBuf, size_t destSize, const ubyte srcBuf, size_t srcSize, uint* pAdler32){
+public LZHAMDecompressionStatus decompressMem(LZHAMDecompressionParameters* pParams, ubyte* destBuf, size_t destSize, ubyte* srcBuf, size_t srcSize, uint* pAdler32){
 	if (pParams is null)
 		return LZHAMDecompressionStatus.INVALID_PARAMETER;
 	
@@ -4027,16 +4034,16 @@ public LZHAMDecompressionStatus decompressMem(LZHAMDecompressionParameters pPara
 	if (compressor is null)
 		return LZHAMDecompressionStatus.FAILED_INITIALIZING;
 	
-	LZHAMDecompressionStatus status = decompress(pState, srcBuf, &srcSize, destBuf, &destSize, true);
+	LZHAMDecompressionStatus status = decompress(compressor, srcBuf, &srcSize, destBuf, &destSize, true);
 	
-	uint adler32 = decompressDeinit(pState);
+	uint adler32 = decompressDeinit(compressor);
 	if (pAdler32 !is null)
 		*pAdler32 = adler32;
 	
 	return status;
 }
 public int z_inflateInit(LZHAMZStream* pStream){
-	return z_inflateInit2;
+	return z_inflateInit2(pStream, LZHAM_Z_DEFAULT_WINDOW_BITS);
 }
 public int z_inflateInit2(LZHAMZStream* pStream, int windowBits){
 	if (pStream is null) 
@@ -4062,14 +4069,14 @@ public int z_inflateInit2(LZHAMZStream* pStream, int windowBits){
 	if (windowBits > 0)
 		params.decompressFlags |= LZHAMDecompressFlags.READ_ZLIB_STREAM;
 	
-	LZHAMDecompressor decompressor = lzham_lib_decompress_init(&params);
+	LZHAMDecompressor decompressor = decompressInit(&params);
 	if (!decompressor)
 		return LZHAM_Z_MEM_ERROR;
-	pStream.state = decompressor;
+	pStream.stateDecomp = decompressor;
 	
 	pStream.data_type = 0;
-	pStream.adler = LZHAM_Z_ADLER32_INIT;
-	pStream.msg = NULL;
+	pStream.adler = 1;
+	pStream.msg = null;
 	pStream.total_in = 0;
 	pStream.total_out = 0;
 	pStream.reserved = 0;
@@ -4077,21 +4084,21 @@ public int z_inflateInit2(LZHAMZStream* pStream, int windowBits){
 	return LZHAM_Z_OK;
 }
 public int z_inflateReset(LZHAMZStream* pStream){
-	if ((pStream is null) || (pStream.state is null)) 
+	if ((pStream is null) || (pStream.stateDecomp is null)) 
 		return LZHAM_Z_STREAM_ERROR;
 	
-	LZHAMDecompressor pDecomp = pStream.state;
+	LZHAMDecompressor pDecomp = pStream.stateDecomp;
 	//lzham_decompressor *pDecomp = static_cast<lzham_decompressor *>(pState);
 	
-	LZHAMDecompressionParameters params(pDecomp.params);
+	LZHAMDecompressionParameters params = pDecomp.params; //LZHAMDecompressionParameters(pDecomp.params);
 	
-	if (!decompressReinit(pState, &params))
+	if (!decompressReinit(pDecomp, &params))
 		return LZHAM_Z_STREAM_ERROR;
 	
 	return LZHAM_Z_OK;
 }
 public int z_inflate(LZHAMZStream* pStream, int flush){
-	if ((pStream is null) || (pStream.state is null)) 
+	if ((pStream is null) || (pStream.stateDecomp is null)) 
 		return LZHAM_Z_STREAM_ERROR;
 	
 	if ((flush == LZHAM_Z_PARTIAL_FLUSH) || (flush == LZHAM_Z_FULL_FLUSH))
@@ -4104,22 +4111,22 @@ public int z_inflate(LZHAMZStream* pStream, int flush){
 	size_t origAvailIn = pStream.avail_in;
 	
 	//LZHAMDecompressionStatus pState = pStream.state;
-	LZHAMDecompressor pDecomp = pStream.state;
-	if (pDecomp.m_z_last_status >= LZHAMCompressionStatus.FIRST_SUCCESS_OR_FAILURE_CODE)
+	LZHAMDecompressor pDecomp = pStream.stateDecomp;
+	if (pDecomp.lastStatus >= LZHAMCompressionStatus.FIRST_SUCCESS_OR_FAILURE_CODE)
 		return LZHAM_Z_DATA_ERROR;
 
 	if (pDecomp.m_z_has_flushed && (flush != LZHAM_Z_FINISH)) 
 		return LZHAM_Z_STREAM_ERROR;
 	pDecomp.m_z_has_flushed |= (flush == LZHAM_Z_FINISH);
 	
-	lzham_decompress_status_t status;
+	LZHAMDecompressionStatus status;
 	for ( ; ; ){
 		size_t inBytes = pStream.avail_in;
 		size_t outBytes = pStream.avail_out;
 		bool noMoreInputBytesFlag = (flush == LZHAM_Z_FINISH);
-		status = decompress(pState, pStream.next_in, &inBytes, pStream.next_out, &outBytes, noMoreInputBytesFlag);
+		status = decompress(pDecomp, pStream.next_in, &inBytes, pStream.next_out, &outBytes, noMoreInputBytesFlag);
 		
-		pDecomp.m_z_last_status = status;
+		pDecomp.lastStatus = status;
 		
 		pStream.next_in += cast(uint)inBytes; 
 		pStream.avail_in -= cast(uint)inBytes;
@@ -4159,17 +4166,17 @@ public int z_inflateEnd(LZHAMZStream* pStream){
 		return LZHAM_Z_STREAM_ERROR;
 
 	//lzham_decompress_state_ptr pState = static_cast<lzham_decompress_state_ptr>(pStream->state);
-	if (pStream.state !is null){
-		pStream.adler = decompressDeinit(pStream.state);
-		pStream.state = null;
+	if (pStream.stateDecomp !is null){
+		pStream.adler = decompressDeinit(pStream.stateDecomp);
+		pStream.stateDecomp = null;
 	}
 	
 	return LZHAM_Z_OK;
 }
-public int z_decompress(ubyte* pDest, ulong pDest_len, const ubyte* pSource, size_t source_len){
+public int z_decompress(ubyte* pDest, ulong* pDest_len, ubyte* pSource, size_t source_len){
 	LZHAMZStream stream;
 	int status;
-	memset(&stream, 0, sizeof(stream));
+	//memset(&stream, 0, stream.sizeof);
 	
 	// In case lzham_z_ulong is 64-bits (argh I hate longs).
 	if ((source_len | *pDest_len) > 0xFFFFFFFFU) 
@@ -4186,7 +4193,7 @@ public int z_decompress(ubyte* pDest, ulong pDest_len, const ubyte* pSource, siz
 	
 	status = z_inflate(&stream, LZHAM_Z_FINISH);
 	if (status != LZHAM_Z_STREAM_END){
-		lzham_lib_z_inflateEnd(&stream);
+		z_inflateEnd(&stream);
 		return ((status == LZHAM_Z_BUF_ERROR) && (!stream.avail_in)) ? LZHAM_Z_DATA_ERROR : status;
 	}
 	*pDest_len = stream.total_out;
@@ -4196,7 +4203,7 @@ public int z_decompress(ubyte* pDest, ulong pDest_len, const ubyte* pSource, siz
 /**
  * Decided to replace the internal algorithm with an associative array.
  */
-public const char* z_error(int err){
+public char* z_error(int err){
 	/*static struct 
 	{ 
 		int m_err; 
@@ -4220,15 +4227,21 @@ public const char* z_error(int err){
 			return s_error_descs[i].m_pDesc;*/
 	if(zErrorCodes.get(err, null) is null)
 		return null;
-	return zErrorCodes[err].ptr;
+	return cast(char*)zErrorCodes[err].ptr;
 }
 
-public size_t z_adler32(size_t adler, const ubyte* ptr, size_t buf_len){
+public size_t z_adler32(size_t adler, ubyte* ptr, size_t buf_len){
 	return adler32(ptr, buf_len, cast(uint)(adler));
 }
 
-public size_t z_crc32(size_t crc, const lzham_uint8 *ptr, size_t buf_len){
-	return crc32(cast(uint)(crc), ptr, buf_len);
+public size_t z_crc32(size_t crc, ubyte *ptr, size_t buf_len){
+	//return crc32(cast(uint)(crc), ptr, buf_len);
+	ubyte[] result = crc32(cast(uint)(crc), ptr, buf_len);
+	size_t subresult;
+	for(int i; i < result.length; i++){
+		subresult |= result[i]<<(i * 8);
+	}
+	return subresult;
 }
 
 package static string[int] zErrorCodes;

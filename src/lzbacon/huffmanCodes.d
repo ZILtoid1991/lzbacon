@@ -97,14 +97,13 @@ static @nogc SymFreq* radixSortSyms(uint numSyms, SymFreq* syms0, SymFreq* syms1
             }
          }
 
-         if (num_syms & 1)
-         {
-            uint c = ((p->m_freq) >> pass_shift) & 0xFF;
+         if (numSyms & 1){
+            uint c = ((p.mFreq) >> passShift) & 0xFF;
 
-            uint dst_offset = offsets[c];
-            offsets[c] = dst_offset + 1;
+            uint dstOffset = offsets[c];
+            offsets[c] = dstOffset + 1;
 
-            pNew_syms[dst_offset] = *p;
+            pNewSyms[dstOffset] = *p;
          }
 
          SymFreq* t = pCurSyms;
@@ -118,7 +117,7 @@ struct HuffmanWorkTables{
 		cMaxInternalNodes = cHuffmanMaxSupportedSyms
 	}
 	SymFreq[cHuffmanMaxSupportedSyms + 1 + cMaxInternalNodes] syms0;
-	SymFreq[cHuffmanMaxSupportedSyms + 1 + cMaxInternalNodes] syms0;
+	SymFreq[cHuffmanMaxSupportedSyms + 1 + cMaxInternalNodes] syms1;
 }
 /**
  * DEPRACATED, use HuffmanWorkTables.sizeof instead!
@@ -184,10 +183,10 @@ static @nogc bool generateHuffmanCodes(void* pContext, uint numSyms, const ushor
 
 	HuffmanWorkTables* state = cast(HuffmanWorkTables*)pContext;
 
-	uint max_freq = 0;
-	uint total_freq = 0;
+	uint maxFreq = 0;
+	uint totalFreq = 0;
       
-	uint num_used_syms = 0;
+	uint numUsedSyms = 0;
 
 	for (uint i = 0; i < numSyms; i++){
 		uint freq = pFreq[i];
@@ -195,33 +194,33 @@ static @nogc bool generateHuffmanCodes(void* pContext, uint numSyms, const ushor
 		if (!freq)
 			pCodesizes[i] = 0;
 		else{
-			total_freq += freq;
-			max_freq = max_freq > freq ? max_freq : freq;
+			totalFreq += freq;
+			maxFreq = maxFreq > freq ? maxFreq : freq;
             
-			SymFreq* sf = &state.syms0[num_used_syms];
-			sf.m_left = cast(ushort)i;
-			sf.m_right = ushort.max;
-			sf.m_freq = freq;
-			num_used_syms++;
+			SymFreq* sf = &state.syms0[numUsedSyms];
+			sf.mLeft = cast(ushort)i;
+			sf.mRight = ushort.max;
+			sf.mFreq = freq;
+			numUsedSyms++;
 		}            
 	}
 	
-	total_freq_ret = total_freq;
-	if (num_used_syms == 1){
-		pCodesizes[state.syms0[0].m_left] = 1;
+	total_freq_ret = totalFreq;
+	if (numUsedSyms == 1){
+		pCodesizes[state.syms0[0].mLeft] = 1;
 		return true;
 	}
 
-	SymFreq* syms = radixSortSyms(num_used_syms, state.syms0.ptr, state.syms1.ptr);
+	SymFreq* syms = radixSortSyms(numUsedSyms, state.syms0.ptr, state.syms1.ptr);
 
 	int[cHuffmanMaxSupportedSyms] x;	//this was int in the original code, it probably should work
-	for(uint i = 0 ; i < num_used_syms ; i++){
+	for(uint i = 0 ; i < numUsedSyms ; i++){
 		x[i] = syms[i].mFreq;
 	}
-	calculateMinimumRedundancy(x, num_used_syms);
+	calculateMinimumRedundancy(x.ptr, numUsedSyms);
 
 	uint max_len = 0;
-	for (uint i = 0; i < num_used_syms; i++){
+	for (uint i = 0; i < numUsedSyms; i++){
 		uint len = x[i];
 		max_len = len > max_len ? len : max_len;
 		pCodesizes[syms[i].mLeft] = cast(ubyte)len;
