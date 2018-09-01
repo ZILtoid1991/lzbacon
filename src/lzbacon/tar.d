@@ -3,6 +3,8 @@ module lzbacon.tar;
 import std.file;
 import std.datetime;
 
+import core.stdc.string;
+
 /**
  * GNU sparse implementation
  */
@@ -15,20 +17,26 @@ struct GNUTarSparse{
  */
 struct USTarExtension{
 	char[6]		magic;///Header extension identification
-	char[2]		version;///"00" by default
+	char[2]		vers;///"00" by default
 	char[32]	uname;///Stores user names
 	char[32]	gname;///Stores group names
 	char[8]		devmajor;
 	char[8]		devminor;
 	char[155]	prefix;///Extends the filename by storing path here
 	char[12]	pad;///Unused by default
+	/**
+	 * Sets default values.
+	 */
+	void initialize(){
+		vers = "00";
+	}
 }
 /**
  * GNU tar header extensions.
  */
 struct GNUTarExtension{
 	char[6]		magic;///Header extension identification
-	char[2]		version;///"00" by default
+	char[2]		vers;///"00" by default
 	char[32]	uname;///Stores user names
 	char[32]	gname;///Stores group names
 	char[8]		devmajor;
@@ -42,6 +50,12 @@ struct GNUTarExtension{
 	char[1]		isextended;
 	char[12]	realsize;
 	char[17]	pad;///Unused by default
+	/**
+	 * Sets default values.
+	 */
+	void initialize(){
+		vers = "00";
+	}
 }
 /**
  * Stores the supported values of typeflag.
@@ -82,9 +96,9 @@ public struct TarHeader {
 	public char[1]		typeflag;///Originally linkflag, this later became the typeflag.
 	public char[100]	linkname;///Holds the name of the previous file having the same data as this.
 	union{
-		public char[255]		pad;///Holds no information by default, holds 
-		public USTarExtension	ustarext;///Accesses the ustar extension fields
-		public GNUTarExtension	gnutarext;///Accesses the GNU extension fields
+		public char[255]		pad;///Holds no information by default, holds extensions in later versions.
+		public USTarExtension	ustarext;///Accesses the ustar extension fields.
+		public GNUTarExtension	gnutarext;///Accesses the GNU extension fields.
 	}
 	/**
 	 * Returns the filename as a proper D string.
@@ -180,16 +194,15 @@ public struct TarHeader {
 	 * Calculates the checksum of the header.
 	 */
 	public void calculateChecksum(){
-		ulong chks;
-		ubyte* input = cast(ubyte*)name.ptr;
+		checksum = "        ";
+		uint chks;
+		ubyte* src = cast(ubyte)name.ptr;
 		for(int i ; i < 512 ; i++){
-			chks += input[i];
+			chks += src[i];
 		}
-		char[6] chksOctal0 = toOctal!6(chks);
-		checksum = "      \00 ";
-		for(int i ; i < chksOctal0.length ; i++){
-			checksum[i]+=chksOctal0[i];
-		}
+		char[6] chks0 = toOctal!6(chks);
+		memcpy(checksum.ptr, chks0.ptr, 6);
+		checksum[6] = '\00';//zero terminate string
 	}
 	/**
 	 * Parses an octal string.
@@ -266,5 +279,6 @@ public struct TarHeader {
 	}
 }
 unittest{
+	//Test if the template compiles and works as intended
 	assert(TarHeader.toOctal(8) == "00000000010\00");
 }

@@ -46,7 +46,12 @@ public class OutputBufferTooSmallException : LZHAMException{
 		super(msg, file, line, nextInChain);
 	}
 }
-public class TarHeaderException : LZHAMException{
+public class TarHeaderException : Exception{
+	this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable nextInChain = null){
+		super(msg, file, line, nextInChain);
+	}
+}
+public class DPKException : Exception{
 	this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable nextInChain = null){
 		super(msg, file, line, nextInChain);
 	}
