@@ -9,7 +9,6 @@ module lzbacon.common;
 import lzbacon.decompression;
 import lzbacon.compression;
 
-//NOTE: These probably will be thrown out
 static immutable int LZHAM_MIN_ALLOC_ALIGNMENT = size_t.sizeof*2;
 static immutable int LZHAM_MIN_DICT_SIZE_LOG2 = 15;
 static immutable int LZHAM_MAX_DICT_SIZE_LOG2_X86 = 26;
@@ -66,7 +65,7 @@ enum LZHAMCompressFlags{
 }
 ///Sets the update rate of the table
 enum LZHAMTableUpdateRate{
-	INSANELY_SLOW = 1, // 1=insanely slow decompression, here for reference, use 2!
+	INSANELY_SLOW = 1, /// 1=insanely slow decompression, here for reference, use 2!
 	SLOWEST_TABLE = 2,
 	DEFAULT = 8,
 	FASTEST = 20
@@ -78,14 +77,14 @@ enum LZHAMTableUpdateRate{
  * The seed buffer's contents and size must match the seed buffer used during decompression.
  */
 struct LZHAMCompressionParameters{
-	uint struct_size;            // set to LZHAMCompressionParameters.sizeOf
-	uint dictSizeLog2;         // set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
-	LZHAMCompressLevel level;          // set to LZHAM_COMP_LEVEL_FASTEST, etc.
-	uint tableUpdateRate;		// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
-	int maxHelperThreads;      // max # of additional "helper" threads to create, must range between [-1,LZHAM_MAX_HELPER_THREADS], where -1=max practical
-	uint compressFlags;         // optional compression flags (see lzham_compress_flags enum)
-	uint numSeedBytes;         // for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
-	void* pSeedBytes;             // for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
+	uint struct_size;            /// set to LZHAMCompressionParameters.sizeOf
+	uint dictSizeLog2;         /// set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
+	LZHAMCompressLevel level;          /// set to LZHAM_COMP_LEVEL_FASTEST, etc.
+	uint tableUpdateRate;		/// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
+	int maxHelperThreads;      /// max # of additional "helper" threads to create, must range between [-1,LZHAM_MAX_HELPER_THREADS], where -1=max practical
+	uint compressFlags;         /// optional compression flags (see lzham_compress_flags enum)
+	uint numSeedBytes;         /// for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
+	void* pSeedBytes;             /// for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
 	
 	// Advanced settings - set to 0 if you don't care.
 	// m_table_max_update_interval/m_table_update_interval_slow_rate override m_table_update_rate and allow finer control over the table update settings.
@@ -98,25 +97,25 @@ struct LZHAMCompressionParameters{
 }
 ///
 enum LZHAMDecompressionStatus{
-	// LZHAM_DECOMP_STATUS_NOT_FINISHED indicates that the decompressor is flushing its internal buffer to the caller's output buffer. 
-	// There may be more bytes available to decompress on the next call, but there is no guarantee.
+	/// LZHAM_DECOMP_STATUS_NOT_FINISHED indicates that the decompressor is flushing its internal buffer to the caller's output buffer. 
+	/// There may be more bytes available to decompress on the next call, but there is no guarantee.
 	NOT_FINISHED = 0,
 
-	// LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT indicates that the decompressor is trying to flush its internal buffer to the caller's output buffer, 
-	// but the caller hasn't provided any space to copy this data to the caller's output buffer. Call the lzham_decompress() again with a non-empty sized output buffer.
+	/// LZHAM_DECOMP_STATUS_HAS_MORE_OUTPUT indicates that the decompressor is trying to flush its internal buffer to the caller's output buffer, 
+	/// but the caller hasn't provided any space to copy this data to the caller's output buffer. Call the lzham_decompress() again with a non-empty sized output buffer.
 	HAS_MORE_OUTPUT,
 
-	// LZHAM_DECOMP_STATUS_NEEDS_MORE_INPUT indicates that the decompressor has consumed all input bytes, has not encountered an "end of stream" code, 
-	// and the caller hasn't set no_more_input_bytes_flag to true, so it's expecting more input to proceed.
+	/// LZHAM_DECOMP_STATUS_NEEDS_MORE_INPUT indicates that the decompressor has consumed all input bytes, has not encountered an "end of stream" code, 
+	/// and the caller hasn't set no_more_input_bytes_flag to true, so it's expecting more input to proceed.
 	NEEDS_MORE_INPUT,
 
-	// All the following enums always (and MUST) indicate failure/success.
+	/// All the following enums always (and MUST) indicate failure/success.
 	FIRST_SUCCESS_OR_FAILURE_CODE,
 
-	// LZHAM_DECOMP_STATUS_SUCCESS indicates decompression has successfully completed.
+	/// LZHAM_DECOMP_STATUS_SUCCESS indicates decompression has successfully completed.
 	SUCCESS,// = FIRST_SUCCESS_OR_FAILURE_CODE,
 
-	// The remaining status codes indicate a failure of some sort. Most failures are unrecoverable. TODO: Document which codes are recoverable.
+	/// The remaining status codes indicate a failure of some sort. Most failures are unrecoverable. TODO: Document which codes are recoverable.
 	FIRST_FAILURE_CODE,
 
 	FAILED_INITIALIZING,// = LZHAM_DECOMP_STATUS_FIRST_FAILURE_CODE,
@@ -132,20 +131,20 @@ enum LZHAMDecompressionStatus{
 	FAILED_BAD_SYNC_BLOCK,
 	INVALID_PARAMETER,
 }
-///
+/// Decompression flags
 enum LZHAMDecompressFlags{
-	OUTPUT_UNBUFFERED = 1,
-	COMPUTE_ADLER32 = 2,
-	READ_ZLIB_STREAM = 4,
+	OUTPUT_UNBUFFERED = 1,	///No dictionary is used
+	COMPUTE_ADLER32 = 2,	///Enables adler32 checks
+	READ_ZLIB_STREAM = 4,	///Makes it ro decompress deflate streams
 }
 /// Stores decompression parameters
 struct LZHAMDecompressionParameters{
-	uint structSize;            // set to sizeof(lzham_decompress_params)
-	uint dictSizeLog2;         // set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
-	uint tableUpdateRate;		// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
-	uint decompressFlags;       // optional decompression flags (see lzham_decompress_flags enum)
-	uint numSeedBytes;         // for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
-	void *seedBytes;             // for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
+	uint structSize;            /// set to sizeof(lzham_decompress_params)
+	uint dictSizeLog2;         /// set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
+	uint tableUpdateRate;		/// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
+	uint decompressFlags;       /// optional decompression flags (see lzham_decompress_flags enum)
+	uint numSeedBytes;         /// for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
+	void *seedBytes;             /// for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
 
 	// Advanced settings - set to 0 if you don't care.
 	// m_table_max_update_interval/m_table_update_interval_slow_rate override m_table_update_rate and allow finer control over the table update settings.
@@ -166,13 +165,13 @@ enum{
 }
 /// Flush values for ZLib compatibility mode.
 enum{ 
-	LZHAM_Z_NO_FLUSH = 0,       // compression/decompression
-	LZHAM_Z_PARTIAL_FLUSH = 1,  // compression/decompression, same as LZHAM_Z_SYNC_FLUSH
-	LZHAM_Z_SYNC_FLUSH = 2,     // compression/decompression, when compressing: flush current block (if any), always outputs sync block (aligns output to byte boundary, a 0xFFFF0000 marker will appear in the output stream)
-	LZHAM_Z_FULL_FLUSH = 3,     // compression/decompression, when compressing: same as LZHAM_Z_SYNC_FLUSH but also forces a full state flush (LZ dictionary, all symbol statistics)
-	LZHAM_Z_FINISH = 4,         // compression/decompression
-	LZHAM_Z_BLOCK = 5,          // not supported
-	LZHAM_Z_TABLE_FLUSH = 10    // compression only, resets all symbol table update rates to maximum frequency (LZHAM extension)
+	LZHAM_Z_NO_FLUSH = 0,       /// compression/decompression
+	LZHAM_Z_PARTIAL_FLUSH = 1,  /// compression/decompression, same as LZHAM_Z_SYNC_FLUSH
+	LZHAM_Z_SYNC_FLUSH = 2,     /// compression/decompression, when compressing: flush current block (if any), always outputs sync block (aligns output to byte boundary, a 0xFFFF0000 marker will appear in the output stream)
+	LZHAM_Z_FULL_FLUSH = 3,     /// compression/decompression, when compressing: same as LZHAM_Z_SYNC_FLUSH but also forces a full state flush (LZ dictionary, all symbol statistics)
+	LZHAM_Z_FINISH = 4,         /// compression/decompression
+	LZHAM_Z_BLOCK = 5,          /// not supported
+	LZHAM_Z_TABLE_FLUSH = 10    /// compression only, resets all symbol table update rates to maximum frequency (LZHAM extension)
 }
 /// Return values for ZLib compatibility mode. NOTE: error values might be replaced with exceptions
 enum{ 
@@ -192,7 +191,7 @@ enum{
 	LZHAM_Z_NO_COMPRESSION = 0,
 	LZHAM_Z_BEST_SPEED = 1,
 	LZHAM_Z_BEST_COMPRESSION = 9,
-	LZHAM_Z_UBER_COMPRESSION = 10,      // uber = best with extreme parsing (can be very slow)
+	LZHAM_Z_UBER_COMPRESSION = 10,      /// uber = best with extreme parsing (can be very slow)
 	LZHAM_Z_DEFAULT_COMPRESSION = -1 
 }
 /// Data types for ZLib compatibility.
@@ -213,8 +212,8 @@ struct LZHAMZStream{
 
 	char* msg;
 	union{
-		LZHAMDecompressor stateDecomp;   /// originally: internal state, allocated by zalloc/zfree, now a decompression algorithm
-		LZHAMCompressState* stateComp;
+		LZHAMDecompressor stateDecomp;	/// originally: internal state, allocated by zalloc/zfree, now a decompressor
+		LZHAMCompressState* stateComp;	/// Stores the compression state alongside the compressor
 	}
 	// LZHAM does not support per-stream heap callbacks. Use lzham_set_memory_callbacks() instead.
 	// These members are ignored - they are here for backwards compatibility with zlib.
@@ -239,6 +238,16 @@ static immutable int LZHAM_Z_VER_SUBREVISION = 0;
 
 static immutable int LZHAM_Z_DEFAULT_WINDOW_BITS = 15;
 
+/**
+ * Stores compression parameters in an LZHAM file.
+ * This is not present in the original implementation and will break compatibility.
+ */
+public struct LZHAMFileHeader{
+	uint			tableUpdateRate;			///Table update rate.
+	ushort 			log2DictSize;				///Log2 dictionary size.
+	ushort			tableMaxUpdateInterval;		///Sets the update interval.
+	uint			tableUpdateIntervalSlowRate;///Sets the slowing down of the table update interval.
+}
 /// Class implementation of the LZHAM codec
 /*public class LZHAM{
 	public uint delegate() getVersion;

@@ -26,7 +26,9 @@ enum{
 }
 static const uint sHugeMatchBaseLen[4] = [ CLZDecompBase.cMaxMatchLen + 1, CLZDecompBase.cMaxMatchLen + 1 + 256, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024 + 4096 ];
 static const ubyte sHugeMatchCodeLen[4] = [ 8, 10, 12, 16 ];
-
+/**
+ * Decompression codec implementation.
+ */
 public class LZHAMDecompressor : Fiber{
 	static if(CPU_64BIT_CAPABLE){
 		static enum cBitBufSize = 64;
@@ -80,11 +82,11 @@ public class LZHAMDecompressor : Fiber{
 	debug uint blockIndex;
 
 	// most likely these will be removed
-	int matchHist0;
-	int matchHist1;
-	int matchHist2;
-	int matchHist3;
-	uint curState;
+	int matchHist0;		///Currently unused, was used as a crude way to implement a coroutine. No longer needed thanks to Fiber
+	int matchHist1;		///Currently unused, was used as a crude way to implement a coroutine. No longer needed thanks to Fiber
+	int matchHist2;		///Currently unused, was used as a crude way to implement a coroutine. No longer needed thanks to Fiber
+	int matchHist3;		///Currently unused, was used as a crude way to implement a coroutine. No longer needed thanks to Fiber
+	uint curState;		///Currently unused, was used as a crude way to implement a coroutine. No longer needed thanks to Fiber
 	
 	uint startBlockDstOfs;
 	
@@ -113,7 +115,7 @@ public class LZHAMDecompressor : Fiber{
 	//uint m_debug_match_dist;
 	//uint m_debug_lit;
 	
-	LZHAMDecompressionStatus lastStatus;
+	LZHAMDecompressionStatus lastStatus;	///Stores the last status the fiber have exited.
 	uint m_z_first_call;
 	uint m_z_has_flushed;
 	uint m_z_cmf;
@@ -181,25 +183,23 @@ public class LZHAMDecompressor : Fiber{
 		
 		codec.clear();
 	}
-	
+	/// ORIGINAL COMMENT
+	/// Important: This function is a coroutine. ANY locals variables that need to be preserved across coroutine
+	/// returns must be either be a member variable, or a local which is saved/restored to a member variable at
+	/// the right times. (This makes this function difficult to follow and freaking ugly due to the macros of doom - but hey it works.)
+	/// The most often used variables are in locals so the compiler hopefully puts them into CPU registers.
+	/// END OF ORIGINAL COMMENT
+	///
+	/// I decided to use Fiber from core.thread for implementing this coroutine, which means that local variables will automatically preserved.
+	/// Currently I'm only commenting out the saving in case if I decide to do something else.
+	/// Please use void LZHAMDecompressor.call() instead of calling this function directly. The function won't work properly otherwise.
+	/// To do list:
+	///  - Parallelize memcpy and memset if the compiler won't do it.
+	///  - Code cleanup
+	///  - Add switch-case since it's no longer forbidden
+	///  - Some further optimizations
+	///  - Add some extra capabilities, e.g. delta compression, random access
 	void decompress(bool unbuffered = false)(){
-		// ORIGINAL COMMENT
-		// Important: This function is a coroutine. ANY locals variables that need to be preserved across coroutine
-		// returns must be either be a member variable, or a local which is saved/restored to a member variable at
-		// the right times. (This makes this function difficult to follow and freaking ugly due to the macros of doom - but hey it works.)
-		// The most often used variables are in locals so the compiler hopefully puts them into CPU registers.
-		// END OF ORIGINAL COMMENT
-		//
-		// I decided to use Fiber from core.thread for implementing this coroutine, which means that local variables will automatically preserved.
-		// Currently I'm only commenting out the saving in case if I decide to do something else.
-		// To do list:
-		//  - Parallelize memcpy and memset if the compiler won't do it.
-		//  - Code cleanup
-		//  - Add switch-case since it's no longer forbidden
-		//  - Some further optimizations
-		//  - Add some extra capabilities, e.g. delta compression, random access
-		
-		
 		SymbolCodec codec = this.codec;
 		const uint dictSize = 1U << params.dictSizeLog2;
 		//const uint dictSizeMask = unbuffered ? UINT_MAX : (dict_size - 1);
@@ -221,13 +221,13 @@ public class LZHAMDecompressor : Fiber{
 			ubyte* pDstEnd = pDst + dictSize;
 		}
 		uint arithValue;
-		uint arithLength = 0;
+		uint arithLength;
 		static if(CPU_64BIT_CAPABLE){
-			ulong bitBuf = 0; 
+			ulong bitBuf; 
 		}else{
-			uint bitBuf = 0; 
+			uint bitBuf; 
 		}
-		int bitCount = 0; 
+		int bitCount; 
 		ubyte* decodeBufNext;//was const originally
 		
 		if ((!unbuffered) && (params.numSeedBytes)){
@@ -3881,10 +3881,10 @@ public class LZHAMDecompressor : Fiber{
 		
 		mainTable.resetUpdateRate();
 		
-		for (uint i = 0; i < repLenTable.length; i++)
+		for (uint i ; i < repLenTable.length; i++)
 			repLenTable[i].resetUpdateRate();
 		
-		for (uint i = 0; i < largeLenTable.length; i++)
+		for (uint i ; i < largeLenTable.length; i++)
 			largeLenTable[i].resetUpdateRate();
 		
 		distLsbTable.resetUpdateRate();
@@ -3906,7 +3906,9 @@ package @nogc static bool checkParams(const LZHAMDecompressionParameters *pParam
 	}
 	return true;
 }
-
+/**
+ * Initializes decompressor from parameters.
+ */
 public LZHAMDecompressor decompressInit(LZHAMDecompressionParameters* params){
 	if (!checkParams(params))
 		return null;
@@ -3924,7 +3926,7 @@ public LZHAMDecompressor decompressInit(LZHAMDecompressionParameters* params){
 	}else{
 		decompressor = new LZHAMDecompressor(false);
 		decompressor.params = *params;
-		uint decompBufSize = 1U << decompressor.params.dictSizeLog2;
+		const uint decompBufSize = 1U << decompressor.params.dictSizeLog2;
 		decompressor.rawDecompBuf = cast(ubyte*)(malloc(decompBufSize + 15));
 		/*if (!pState->m_pRaw_decomp_buf)
 		{
@@ -3939,6 +3941,9 @@ public LZHAMDecompressor decompressInit(LZHAMDecompressionParameters* params){
 	
 	return decompressor;
 }
+/**
+ * Reinitializes decompressor for faster
+ */
 public LZHAMDecompressor decompressReinit(LZHAMDecompressor decompressor, LZHAMDecompressionParameters* params){
 	if (!decompressor)
 		return decompressInit(params);
@@ -3973,13 +3978,21 @@ public LZHAMDecompressor decompressReinit(LZHAMDecompressor decompressor, LZHAMD
 	decomp2.resetArithTables();
 	return decompressor;
 }
+/**
+ * Deinitializes the decompressor.
+ * The reference of the decompressor should be set to null, so the garbage collector can destroy it.
+ */
 public uint decompressDeinit(LZHAMDecompressor decompressor){
 	if(decompressor is null)
 		return 0;
 	free(decompressor.rawDecompBuf);
 	return decompressor.decompAdler32;
 }
-public LZHAMDecompressionStatus decompress(LZHAMDecompressor decompressor, ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, size_t* outBufSize, bool noMoreInputBytesFlag){
+/**
+ * Decompresses an LZHAM stream
+ */
+public LZHAMDecompressionStatus decompress(LZHAMDecompressor decompressor, ubyte* inBuf, size_t* inBufSize, 
+				ubyte* outBuf, size_t* outBufSize, bool noMoreInputBytesFlag){
 	if ((decompressor is null) || (!decompressor.params.dictSizeLog2) || (!inBufSize) || (!outBufSize)){
 		return LZHAMDecompressionStatus.INVALID_PARAMETER;
 	}

@@ -563,10 +563,10 @@ public struct AdaptiveBitModel{
 		bit0Prob = other.bit0Prob;
 	}
 
-	/*@nogc AdaptiveBitModel opAssign(const AdaptiveBitModel rhs){ 
+	@nogc AdaptiveBitModel assign(const AdaptiveBitModel rhs){ 
 		bit0Prob = rhs.bit0Prob;
 		return this;
-	}*/
+	}
 
 	@nogc void clear(){
 		bit0Prob  = 1U << (cSymbolCodecArithProbBits - 1);

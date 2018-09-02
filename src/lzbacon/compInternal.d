@@ -15,7 +15,7 @@ const uint cMaxParseThreads = 8;
 
 enum cCompressionLevelCount = 5;
 
-static uint get_huge_match_code_len(uint len){
+static uint getHugeMatchCodeLen(uint len){
 	assert((len > CLZBase.cMaxMatchLen) && (len <= CLZBase.cMaxHugeMatchLen));
 	len -= (CLZBase.cMaxMatchLen + 1);
 	
@@ -28,7 +28,7 @@ static uint get_huge_match_code_len(uint len){
 	else
 		return 3 + 16;
 }
-static uint get_huge_match_code_bits(uint len){
+static uint getHugeMatchCodeBits(uint len){
 	assert((len > CLZBase.cMaxMatchLen) && (len <= CLZBase.cMaxHugeMatchLen));
 	len -= (CLZBase.cMaxMatchLen + 1);
 	
@@ -110,10 +110,10 @@ public class LZCompressor : CLZBase{
 		//task_pool* m_pTask_pool;
 		uint m_max_helper_threads;
 		
-		LZHAMCompressLevel m_compression_level;
-		uint m_dict_size_log2;
+		LZHAMCompressLevel m_compression_level = LZHAMCompressLevel.DEFAULT;
+		uint m_dict_size_log2 = 22;
 		
-		uint m_block_size;
+		uint m_block_size = cDefaultBlockSize;
 		
 		uint m_lzham_compress_flags;
 		
@@ -246,7 +246,7 @@ public class LZCompressor : CLZBase{
 				if (m_cur_state < 4) m_cur_state = 0; else if (m_cur_state < 10) m_cur_state -= 3; else m_cur_state -= 6;
 			}else{
 				if (lzdec.dist < 0){
-					int match_hist_index = -lzdec.dist - 1;
+					const int match_hist_index = -lzdec.dist - 1;
 					
 					if (!match_hist_index){
 						if (lzdec.len == 1){
@@ -258,14 +258,14 @@ public class LZCompressor : CLZBase{
 						if (match_hist_index == 1){
 							swap(m_match_hist[0], m_match_hist[1]);
 						}else if (match_hist_index == 2){
-							int dist = m_match_hist[2];
+							const int dist = m_match_hist[2];
 							m_match_hist[2] = m_match_hist[1];
 							m_match_hist[1] = m_match_hist[0];
 							m_match_hist[0] = dist;
 						}else{
 							assert(match_hist_index == 3);
 							
-							int dist = m_match_hist[3];
+							const int dist = m_match_hist[3];
 							m_match_hist[3] = m_match_hist[2];
 							m_match_hist[2] = m_match_hist[1];
 							m_match_hist[1] = m_match_hist[0];
@@ -306,13 +306,13 @@ public class LZCompressor : CLZBase{
 	private class State : StateBase{
 		uint m_block_start_dict_ofs;
 		
-		AdaptiveBitModel m_is_match_model[CLZBase.cNumStates];
+		AdaptiveBitModel[CLZBase.cNumStates] m_is_match_model;
 		
-		AdaptiveBitModel m_is_rep_model[CLZBase.cNumStates];
-		AdaptiveBitModel m_is_rep0_model[CLZBase.cNumStates];
-		AdaptiveBitModel m_is_rep0_single_byte_model[CLZBase.cNumStates];
-		AdaptiveBitModel m_is_rep1_model[CLZBase.cNumStates];
-		AdaptiveBitModel m_is_rep2_model[CLZBase.cNumStates];
+		AdaptiveBitModel[CLZBase.cNumStates] m_is_rep_model;
+		AdaptiveBitModel[CLZBase.cNumStates] m_is_rep0_model;
+		AdaptiveBitModel[CLZBase.cNumStates] m_is_rep0_single_byte_model;
+		AdaptiveBitModel[CLZBase.cNumStates] m_is_rep1_model;
+		AdaptiveBitModel[CLZBase.cNumStates] m_is_rep2_model;
 		
 		QuasiAdaptiveHuffmanDataModel m_lit_table;
 		QuasiAdaptiveHuffmanDataModel m_delta_lit_table;
@@ -454,14 +454,14 @@ public class LZCompressor : CLZBase{
 							cost += m_is_rep0_single_byte_model[m_cur_state].getCost(0);
 							
 							if (lzdec.len > CLZBase.cMaxMatchLen){
-								cost += get_huge_match_code_len(lzdec.len) + m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
+								cost += getHugeMatchCodeLen(lzdec.len) + m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
 							}else{
 								cost += m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost(lzdec.len - CLZBase.cMinMatchLen);
 							}
 						}
 					}else{
 						if (lzdec.len > CLZBase.cMaxMatchLen)	{
-							cost += get_huge_match_code_len(lzdec.len) + m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
+							cost += getHugeMatchCodeLen(lzdec.len) + m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
 						}else{
 							cost += m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost(lzdec.len - CLZBase.cMinMatchLen);
 						}
@@ -498,7 +498,7 @@ public class LZCompressor : CLZBase{
 					if (lzdec.len >= 9){
 						matchLowSym = 7;
 						if (lzdec.len > CLZBase.cMaxMatchLen){
-							cost += get_huge_match_code_len(lzdec.len) + m_large_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost((CLZBase.cMaxMatchLen + 1) - 9);
+							cost += getHugeMatchCodeLen(lzdec.len) + m_large_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost((CLZBase.cMaxMatchLen + 1) - 9);
 						}else{
 							cost += m_large_len_table[m_cur_state >= CLZBase.cNumLitStates].getCost(lzdec.len - 9);
 						}
@@ -626,7 +626,7 @@ public class LZCompressor : CLZBase{
 				for (int matchLen = minLen; matchLen <= maxLen; matchLen++){
 					// normal rep0
 					if (matchLen > CLZBase.cMaxMatchLen){
-						pBitcosts[matchLen] = get_huge_match_code_len(matchLen) + rep0MatchBaseCost + repLenTable.getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
+						pBitcosts[matchLen] = getHugeMatchCodeLen(matchLen) + rep0MatchBaseCost + repLenTable.getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
 					}else{
 						pBitcosts[matchLen] = rep0MatchBaseCost + repLenTable.getCost(matchLen - CLZBase.cMinMatchLen);
 					}
@@ -634,7 +634,7 @@ public class LZCompressor : CLZBase{
 			}else{
 				for (int matchLen = minLen; matchLen <= maxLen; matchLen++){
 					if (matchLen > CLZBase.cMaxMatchLen){
-						pBitcosts[matchLen] = get_huge_match_code_len(matchLen) + baseCost + repLenTable.getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
+						pBitcosts[matchLen] = getHugeMatchCodeLen(matchLen) + baseCost + repLenTable.getCost((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen);
 					}else{
 						pBitcosts[matchLen] = baseCost + repLenTable.getCost(matchLen - CLZBase.cMinMatchLen);
 					}
@@ -672,7 +672,7 @@ public class LZCompressor : CLZBase{
 				if (matchLen >= 9){
 					matchLowSym = 7;
 					if (matchLen > CLZBase.cMaxMatchLen){
-						lenCost += get_huge_match_code_len(matchLen) + largeLenTable.getCost((CLZBase.cMaxMatchLen + 1) - 9);
+						lenCost += getHugeMatchCodeLen(matchLen) + largeLenTable.getCost((CLZBase.cMaxMatchLen + 1) - 9);
 					}else{
 						lenCost += largeLenTable.getCost(matchLen - 9);
 					}
@@ -881,7 +881,7 @@ public class LZCompressor : CLZBase{
 							
 							if (lzdec.len > CLZBase.cMaxMatchLen){
 								if (!codec.encode((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen, m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates])) return false;
-								if (!codec.encodeBits(get_huge_match_code_bits(lzdec.len), get_huge_match_code_len(lzdec.len))) return false;
+								if (!codec.encodeBits(getHugeMatchCodeBits(lzdec.len), getHugeMatchCodeLen(lzdec.len))) return false;
 							}else{
 								if (!codec.encode(lzdec.len - CLZBase.cMinMatchLen, m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates])) return false;
 							}
@@ -894,7 +894,7 @@ public class LZCompressor : CLZBase{
 						
 						if (lzdec.len > CLZBase.cMaxMatchLen){
 							if (!codec.encode((CLZBase.cMaxMatchLen + 1) - CLZBase.cMinMatchLen, m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates])) return false;
-							if (!codec.encodeBits(get_huge_match_code_bits(lzdec.len), get_huge_match_code_len(lzdec.len))) return false;
+							if (!codec.encodeBits(getHugeMatchCodeBits(lzdec.len), getHugeMatchCodeLen(lzdec.len))) return false;
 						}else{
 							if (!codec.encode(lzdec.len - CLZBase.cMinMatchLen, m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates])) return false;
 						}
@@ -959,7 +959,7 @@ public class LZCompressor : CLZBase{
 					if (largeLenSym >= 0){
 						if (lzdec.len > CLZBase.cMaxMatchLen){
 							if (!codec.encode((CLZBase.cMaxMatchLen + 1) - 9, m_large_len_table[m_cur_state >= CLZBase.cNumLitStates])) return false;
-							if (!codec.encodeBits(get_huge_match_code_bits(lzdec.len), get_huge_match_code_len(lzdec.len))) return false;
+							if (!codec.encodeBits(getHugeMatchCodeBits(lzdec.len), getHugeMatchCodeLen(lzdec.len))) return false;
 						}else{
 							if (!codec.encode(largeLenSym, m_large_len_table[m_cur_state >= CLZBase.cNumLitStates])) return false;
 						}

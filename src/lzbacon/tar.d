@@ -16,27 +16,21 @@ struct GNUTarSparse{
  * Unix standard tar header extensions.
  */
 struct USTarExtension{
-	char[6]		magic;///Header extension identification
-	char[2]		vers;///"00" by default
+	char[6]		magic = IDMagic.ustar;///Header extension identification
+	char[2]		vers = "00";///"00" by default
 	char[32]	uname;///Stores user names
 	char[32]	gname;///Stores group names
 	char[8]		devmajor;
 	char[8]		devminor;
 	char[155]	prefix;///Extends the filename by storing path here
 	char[12]	pad;///Unused by default
-	/**
-	 * Sets default values.
-	 */
-	void initialize(){
-		vers = "00";
-	}
 }
 /**
  * GNU tar header extensions.
  */
 struct GNUTarExtension{
-	char[6]		magic;///Header extension identification
-	char[2]		vers;///"00" by default
+	char[6]		magic = IDMagic.gnutar;///Header extension identification
+	char[2]		vers = "00";///"00" by default
 	char[32]	uname;///Stores user names
 	char[32]	gname;///Stores group names
 	char[8]		devmajor;
@@ -49,13 +43,7 @@ struct GNUTarExtension{
 	GNUTarSparse[4] sparse;///Stores sparse data
 	char[1]		isextended;
 	char[12]	realsize;
-	char[17]	pad;///Unused by default
-	/**
-	 * Sets default values.
-	 */
-	void initialize(){
-		vers = "00";
-	}
+	char[17]	pad;///Unused by default	
 }
 /**
  * Stores the supported values of typeflag.
@@ -78,7 +66,7 @@ enum Typeflag : char{
 /**
  * Identifies the extensions.
  */
-enum IDMagic : string{
+enum IDMagic : char[6]{
 	ustar			=	"ustar\x00",
 	gnutar			=	"gnutar"
 }
@@ -281,4 +269,10 @@ public struct TarHeader {
 unittest{
 	//Test if the template compiles and works as intended
 	assert(TarHeader.toOctal(8) == "00000000010\00");
+}
+/**
+ * tarball reader and writer.
+ */
+public class TarFile{
+
 }

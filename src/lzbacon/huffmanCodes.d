@@ -4,7 +4,9 @@ import lzbacon.common;
 import core.stdc.string;
 
 static immutable uint cHuffmanMaxSupportedSyms = 1024;
-
+/**
+ * Stores the frequency of the occurences of symbols.
+ */
 struct SymFreq{
 	uint mFreq;
 	ushort mLeft;
@@ -131,12 +133,12 @@ static deprecated @nogc uint getGenerateHuffmanCodesTableSize(){
  * Ported to D by Laszlo Szeremi under the name calculateMinimumRedundancy.
  */
 static @nogc void calculateMinimumRedundancy(int* A, int n){
-	int root;                  /* next root node to be used */
-	int leaf;                  /* next leaf to be used */
-	int next;                  /* next value to be assigned */
-	int avbl;                  /* number of available nodes */
-	int used;                  /* number of internal nodes */
-	int dpth;                  /* current depth of leaves */
+	int root;                  /** next root node to be used */
+	int leaf;                  /** next leaf to be used */
+	int next;                  /** next value to be assigned */
+	int avbl;                  /** number of available nodes */
+	int used;                  /** number of internal nodes */
+	int dpth;                  /** current depth of leaves */
 
 	/* check for pathological cases */
 	if (n==0) { return; }
@@ -176,7 +178,8 @@ static @nogc void calculateMinimumRedundancy(int* A, int n){
 	}
 }
 
-static @nogc bool generateHuffmanCodes(void* pContext, uint numSyms, const ushort* pFreq, ubyte* pCodesizes, out uint max_code_size, out uint total_freq_ret){
+static @nogc bool generateHuffmanCodes(void* pContext, uint numSyms, const ushort* pFreq, ubyte* pCodesizes, 
+			out uint maxCodeSize, out uint totalFreqRet){
 	//import core.stdc.math;
 	if ((!numSyms) || (numSyms > cHuffmanMaxSupportedSyms))
 		return false;
@@ -205,7 +208,7 @@ static @nogc bool generateHuffmanCodes(void* pContext, uint numSyms, const ushor
 		}            
 	}
 	
-	total_freq_ret = totalFreq;
+	totalFreqRet = totalFreq;
 	if (numUsedSyms == 1){
 		pCodesizes[state.syms0[0].mLeft] = 1;
 		return true;
@@ -219,13 +222,13 @@ static @nogc bool generateHuffmanCodes(void* pContext, uint numSyms, const ushor
 	}
 	calculateMinimumRedundancy(x.ptr, numUsedSyms);
 
-	uint max_len = 0;
+	uint maxLen = 0;
 	for (uint i = 0; i < numUsedSyms; i++){
 		uint len = x[i];
-		max_len = len > max_len ? len : max_len;
+		maxLen = len > maxLen ? len : maxLen;
 		pCodesizes[syms[i].mLeft] = cast(ubyte)len;
 	}
-	max_code_size = max_len;
+	maxCodeSize = maxLen;
 
 	return true;
 }
