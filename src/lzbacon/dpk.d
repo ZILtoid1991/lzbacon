@@ -1,15 +1,25 @@
 module lzbacon.dpk;
 
+import core.stdc.stdlib;
+
 import std.bitmanip;
 import std.digest;
-import stc.digest.murmurhash;
+import std.digest.murmurhash;
 import std.file;
+import std.string;
+import std.conv;
 import core.stdc.stdio;
+version(Windows){ 
+	import win = core.sys.windows.windows;
+}else version(Posix){
+	import psx = core.sys.posix.sys;
+}
 
 public import lzbacon.exceptions;
 import lzbacon.common;
 import lzbacon.decompression;
 import lzbacon.compression;
+import lzbacon.system;
 
 /**
  * Selects between checksums
@@ -28,12 +38,12 @@ public enum DataPakChecksumType : ubyte{
  */
 public struct DataPakIndex{
 	mixin(bitfields!(
-		ubyte, 4, "checksumType",		/* checksum type identifier */
-		ubyte, 2, "reserved0",			/* reserved if more fields will be needed in the future */
-		bool, 1, "chain",
-		bool, 1, "longHeader",
-		ushort, 12, "extendedLength",
-		uint, 12, "reserved"			/* reserved if more fields will be needed in the future */
+		ubyte, "checksumType", 		4,	/// checksum type identifier
+		ubyte, "", 					2,	/// reserved if more fields will be needed in the future
+		bool, "chain", 				1,	/// if set, the next index contains the rest of the file
+		bool, "longHeader",			1,	/// if set, the field is extended
+		ushort, "extendedLength",	12,	/// field extension size
+		ushort, "",					12	/// reserved if more fields will be needed in the future
 	));
 	uint			length;	///Stores the length of the file, or the block if chaining is enabled for this file.
 	ulong			offset;	///Stores where the file begins.
@@ -46,7 +56,7 @@ public struct DataPakIndex{
 		for(int i ; i < field.length ; i++){
 			if(field[i] == '\x00')
 				break;
-			result ~ field[i];
+			result ~= field[i];
 		}
 		return result;
 	}
@@ -58,12 +68,13 @@ public struct DataPakIndex{
 public struct DataPakFileHeader{
 	ulong			totalLength;	///Total decompressed length of the file in bytes.
 	char[8]			compMethod;		///Identifies the algorithm used for compressing the file, "UNCOMPRD" if uncompressed.
-	ulong			indexFieldLength;///Total length of the index field.
+	ulong			indexFieldLength;///Total length of the index field containing the extra fields.
 	uint			numOfIndexes;	///Total number of file indexes.
 	mixin(bitfields!(
-		bool, 1, "compressedIndex",		/* If true, the indexes are stored in the compressed field. */
-		bool, 1, "noLongIndex",		/* If true, none of the indexes contain extended fields, faster loading will be used. */
-		uint, 30, "reserved",
+		bool, "compressedIndex",	1,		/// If true, the indexes are stored in the compressed field. 
+		bool, "reserved0",			1,		/// If true, none of the indexes contain extended fields, faster loading will be used. 
+		uint, "",					30
+		
 	));
 	ubyte[4]		checksum;		///Murmurhash32/32 checksum for the header and indexes. When processing, this field should set to all zeroes.
 }
@@ -73,6 +84,11 @@ public struct DataPakFileHeader{
 public enum CompMethodID : char[8]{
 	uncompressed		=	"UNCOMPRD",
 	deflate				=	"DEFLATE ",
+	/**
+	 * Deflate with twice the size of the dictionary.
+	 * Rarely used, but offers some speed and compression rate advantage and LZHAM is easy to hack into supporting it by changing the dictionary size to 64k.
+	 */
+	deflate64			=	"DEFLAT64",	
 	lzham				=	"LZHAM   ",
 	dataPakRLE			=	"DPKRLE  ",
 }
@@ -98,7 +114,7 @@ public class DataPak{
 	private size_t					compPos;		///Compression position
 	private LZHAMDecompressor		lzhamDecomp;	///Decompressor for both LZHAM and DEFLATE
 	private LZHAMCompressState*		lzhamComp;		///Compressor for both LZHAM and DEFLATE
-	public static uint				readSize;		///Sets the max size of a single read or write (default is 1024kB)
+	public static uint				rwSize;			///Sets the max size of a single read or write (default is 1024kB)
 	public static uint				compSize;		///Sets the max size of a single compression or decompression(default is 1024kB)
 	/**
 	 * Creates a DataPak object. Does not initializes a file for either reading or writing.
@@ -107,7 +123,7 @@ public class DataPak{
 		this.filename = filename;
 	}
 	static this(){
-		readSize = 1024*1024;
+		rwSize = 1024*1024;
 		compSize = 1024*1024;
 	}
 	~this(){
@@ -118,16 +134,130 @@ public class DataPak{
 			compressDeinit(lzhamComp);
 		}
 		free(cast(void*)readBuffer);
-		free(cast(void*)outBuf)	;
+		free(cast(void*)outBuf);
 	}
 	/**
 	 * Opens the datastream for writing.
-	 * Initialize parameters by specifying a header with the parameters, including the number of indexes
+	 * Initialize parameters by specifying a header with the parameters. Indexes are also needed in the same order the files are intended to be written.
 	 */
-	public void openDataStreamForWriting(DataPakFileHeader header, bool directWrite = true){
-		this.header = header;
+	public void openDataStreamForWriting(DataPakFileHeader header, DataPakIndex[] indexes, bool directWrite = true, 
+				void* compParams = null, char[][int] fieldExtensions = null){
+		this.header = DataPakFileHeader();
 		this.directWrite = directWrite;
+		this.indexes = indexes;
+		extraFields = fieldExtensions;
 		filestream = fopen(toStringz(filename) , "wb");
+		if(!filestream){
+			version (Windows){//Throw if an error happened;
+				const win.DWORD errCode = win.GetLastError();
+				throw new DPKException("Cannot open file for writing!\nError code: " ~ to!string(errCode) ~ "\nError message: " 
+							~ formatSysErrorMessage(errCode));
+			}
+		}
+		//write the null header as a placeholder since we will have to do a checksum calculation
+		fwrite(cast(void*)&this.header, 1, DataPakFileHeader.sizeof, filestream);
+		if(fwrite(cast(void*)&this.header, 1, DataPakFileHeader.sizeof, filestream) != DataPakFileHeader.sizeof){
+			version (Windows){//Throw if an error happened;
+				const win.DWORD errCode = win.GetLastError();
+				throw new DPKException("Could not write to file!\nError code: " ~ to!string(errCode) ~ "\nError message: " 
+							~ formatSysErrorMessage(errCode));
+			}
+		}
+		this.header = header;
+	}
+	/**
+	 * Writes next file from memory into the package from a D array.
+	 */
+	public uint writeNextFile(T)(T[] src){
+		return writeNextFile(cast(ubyte*)(cast(void*)src.ptr), src.length * T.sizeof);
+	}
+	/**
+	 * Writes next file from memory into the package.
+	 * Returns next index position.
+	 */
+	public uint writeNextFile(ubyte* src, size_t srcLen){
+		if(directWrite){
+			if(header.compMethod == CompMethodID.uncompressed){
+				fwrite(src, 1, srcLen, filestream);
+			}else if(header.compMethod == CompMethodID.lzham || header.compMethod == CompMethodID.deflate || header.compMethod ==
+					CompMethodID.deflate64){
+				do{
+					compress(lzhamComp, src, &srcLen, outBuf, &outBufSize, false);
+					if(lzhamComp.status == LZHAMCompressionStatus.HAS_MORE_OUTPUT)
+						fwrite(outBuf, 1, outBufSize, filestream);
+				}while(lzhamComp.status < LZHAMCompressionStatus.FIRST_SUCCESS_OR_FAILURE_CODE);
+				if(lzhamComp.status >= LZHAMCompressionStatus.FIRST_FAILURE_CODE)
+					throw new DPKException("Failed while compressing!");
+				outBufSize = rwSize;
+			}
+			
+		}else{
+
+		}
+		return position++;
+	}
+	/**
+	 * Writes next file from a preexisting file.
+	 * Returns next index position.
+	 */
+	public uint writeNextFile(string filename){
+		FILE* secFileStream = fopen(toStringz(filename) , "rb");
+		if(!secFileStream){
+			version (Windows){//Throw if an error happened;
+				const win.DWORD errCode = win.GetLastError();
+				throw new DPKException("Cannot open file for writing!\nError code: " ~ to!string(errCode) ~ "\nError message: " 
+							~ formatSysErrorMessage(errCode));
+			}
+		}
+		if(readBufferSize < rwSize){
+			readBuffer = cast(ubyte*)realloc(cast(void*)readBuffer, rwSize);
+			readBufferSize = rwSize;
+		}
+		if(header.compMethod == CompMethodID.uncompressed){
+			size_t readsize;
+			if(directWrite){
+				do{
+					readsize = fread(cast(void*)readBuffer, 1, readBufferSize, secFileStream);
+					if(fwrite(cast(void*)readBuffer, 1, readsize, filestream) < readsize){
+						version (Windows){//Throw if an error happened;
+							const win.DWORD errCode = win.GetLastError();
+							throw new DPKException("Error while writing to file!\nError code: " ~ to!string(errCode) ~ "\nError message: " 
+										~ formatSysErrorMessage(errCode));
+						}
+					}
+				} while(readsize < rwSize);
+			}else{
+				do{
+					readsize = fread(cast(void*)readBuffer, 1, readBufferSize, secFileStream);
+					writeBuffer ~= readBuffer[0 .. readsize];
+				} while(readsize < rwSize);
+			}
+		}else if(header.compMethod == CompMethodID.lzham || header.compMethod == CompMethodID.deflate || header.compMethod ==
+				CompMethodID.deflate64){
+			size_t readsize;
+			if(directWrite){
+				do{
+					if(lzhamComp.status == LZHAMCompressionStatus.NEEDS_MORE_INPUT)
+						readsize = fread(cast(void*)readBuffer, 1, readBufferSize, secFileStream);
+					compress(lzhamComp, readBuffer, &readsize, outBuf, &outBufSize, false);
+					if(lzhamComp.status == LZHAMCompressionStatus.HAS_MORE_OUTPUT){
+						if(fwrite(cast(void*)outBuf, 1, outBufSize, filestream) < outBufSize){
+							version (Windows){//Throw if an error happened;
+								const win.DWORD errCode = win.GetLastError();
+								throw new DPKException("Error while writing to file!\nError code: " ~ to!string(errCode) ~ "\nError message: " 
+										~ formatSysErrorMessage(errCode));
+							}
+						}
+					}
+				} while(lzhamComp.status < LZHAMCompressionStatus.FIRST_SUCCESS_OR_FAILURE_CODE);
+			}else{
+				do{
+					readsize = fread(cast(void*)readBuffer, 1, readBufferSize, secFileStream);
+					writeBuffer ~= readBuffer[0 .. readsize];
+				} while(readsize < rwSize);
+			}
+		}
+		return position++;
 	}
 	/**
 	 * Reinitializes reading onto another file.
@@ -142,21 +272,25 @@ public class DataPak{
 	 * Throws DPKException if the file format invalid, FileException if the file inaccessible.
 	 */
 	public void openDataStreamForReading(){
-		import std.string;
+		
 		if(isWriting)
 			throw new DPKException("File is already opened for writing! Close it first before proceeding.");
 		filestream = fopen(toStringz(filename) , "rb");
 		if(!filestream){
-			throw new DPKException("Cannot open file for reading!");
+			version (Windows){
+				const win.DWORD errCode = win.GetLastError();
+				throw new DPKException("Cannot open file for reading!\nError code: " ~ to!string(errCode) ~ "\nError message: " 
+							~ formatSysErrorMessage(errCode));
+			}
 		}
-		readBuffer = cast(ubyte*)malloc(readSize);
-		readBufferSize = readSize;
+		readBuffer = cast(ubyte*)malloc(rwSize)	;
+		readBufferSize = rwSize;	
 		outBuf 	= cast(ubyte*)malloc(compSize);
 		outBufSize = compSize;
-		fread(cast(void*)header.ptr, DataPakFileHeader.sizeof, 1, filestream);
+		fread(cast(void*)&header, DataPakFileHeader.sizeof, 1, filestream);
 		indexes.length = header.numOfIndexes;
 		if(!header.compressedIndex){
-			if(header.noLongIndex){
+			if(true){
 				fread(cast(void*)indexes.ptr, DataPakIndex.sizeof, header.numOfIndexes, filestream);
 			}
 		}else if(header.compMethod == CompMethodID.lzham || header.compMethod == CompMethodID.deflate){
@@ -185,7 +319,7 @@ public class DataPak{
 		LZHAMDecompressionParameters params = LZHAMDecompressionParameters();
 		LZHAMFileHeader lzheader;
 		fread(cast(void*)&lzheader, LZHAMFileHeader.sizeof, 1, filestream);
-		params.dictSizeLog2 = lzheader.dictSizeLog2;
+		params.dictSizeLog2 = lzheader.log2DictSize;
 		params.tableUpdateRate = lzheader.tableUpdateRate;
 		params.tableMaxUpdateInterval = lzheader.tableMaxUpdateInterval;
 		params.tableUpdateIntervalSlowRate = lzheader.tableUpdateIntervalSlowRate;
@@ -226,10 +360,10 @@ public class DataPak{
 			throw new DPKException("Reading has not been initialized!");
 		}
 		if(outBufSize < indexes[position].length){
-			outBufSize = indexes[pos].length;
-			outBuf 	= cast(ubyte*)realloc(cast(ubyte*)outBuf, outBufSize);
+			outBufSize = indexes[position].length;
+			outBuf 	= cast(ubyte*)realloc(cast(void*)outBuf, outBufSize);
 		}else{
-			outBufSize = indexes[pos].length;//Redundant a bit, but I need to check the original size of the comp
+			outBufSize = indexes[position].length;//Redundant a bit, but I need to check the original size of the comp
 		}
 		if(header.compMethod == CompMethodID.uncompressed){
 			//Read directly to the output buffer, throw an exception if an error happened.
@@ -269,14 +403,14 @@ public class DataPak{
 	public ubyte[] getFile(string name){
 		uint pos;
 		for(; pos < indexes.length ; pos++)
-			if(indexes[pos].filename = name)
+			if(indexes[pos].filename == name)
 				break;
 		if(pos >= indexes.length)
 			return null;
 		if(pos == position)
 			return outBuf[0 .. outBufSize];
 		if(header.compMethod == CompMethodID.uncompressed){
-			fseek(filestream, indexes[pos].offset, SEEK_SET);
+			fseek(filestream, cast(sizediff_t)indexes[pos].offset, SEEK_SET);
 			readBufferSize = indexes[pos].length;
 			readBuffer = cast(ubyte*)realloc(cast(ubyte*)readBuffer, readBufferSize);
 			if(!fread(cast(void*)readBuffer, indexes[pos].length, 1, filestream)){
@@ -298,7 +432,7 @@ public class DataPak{
 	 * Returns the index list as a ref const.
 	 * The only accepted way to edit the indexes is when writing, please keep that in mind
 	 */
-	public ref DataPakIndex[] getIndexes() const{
+	public ref DataPakIndex[] getIndexes(){
 		return indexes;
 	}
 	/**
@@ -308,7 +442,8 @@ public class DataPak{
 	private bool calculateChecksum(){
 		ubyte[4] lChks = header.checksum;
 		header.checksum = [0,0,0,0];
-		ubyte[4] newChks = digest!(Murmurhash3!32)(cast(ubyte[])(cast(void[])(header) ~ cast(void[])(indexes)));
+		ubyte[4] newChks = digest!(MurmurHash3!(32))(cast(ubyte[])((cast(void*)(&header))[0 .. DataPakFileHeader.sizeof] ~ 
+				cast(void[])(indexes)));
 		if(*cast(uint*)(lChks.ptr) != *cast(uint*)(newChks.ptr)){
 			header.checksum = newChks;
 			return false;

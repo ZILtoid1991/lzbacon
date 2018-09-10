@@ -1,4 +1,6 @@
 .dub
+.vscode
+bin/
 docs.json
 __dummy.html
 docs/
@@ -12,3 +14,4 @@ lzbacon-test-*
 *.o
 *.obj
 *.lst
+.test

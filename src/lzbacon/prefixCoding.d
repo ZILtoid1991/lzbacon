@@ -17,7 +17,7 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 	if ((!numSyms) || (numSyms > cMaxSupportedSyms) || (maxCodeSize < 1) || (maxCodeSize > cMaxEverCodeSize))
 		return false;
 	
-	uint numCodes[cMaxEverCodeSize + 1];
+	uint[cMaxEverCodeSize + 1] numCodes;
 	
 	bool shouldLimit = false;
 	
@@ -35,7 +35,7 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 		return true;
 	
 	uint ofs = 0;
-	uint nextSortedOfs[cMaxEverCodeSize + 1];
+	uint[cMaxEverCodeSize + 1] nextSortedOfs;
 	for (uint i = 1; i <= cMaxEverCodeSize; i++){
 		nextSortedOfs[i] = ofs;
 		ofs += numCodes[i];
@@ -77,7 +77,7 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 		total--;   
 	} while (total != (1U << maxCodeSize));
 	
-	ubyte newCodesizes[cMaxSupportedSyms];
+	ubyte[cMaxSupportedSyms] newCodesizes;
 	ubyte* p = newCodesizes.ptr;
 	for (uint i = 1; i <= maxCodeSize; i++){
 		uint n = numCodes[i];
@@ -90,10 +90,10 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 	for (uint i = 0; i < numSyms; i++){
 		const uint c = pCodesizes[i];
 		if (c){
-			uint next_ofs = nextSortedOfs[c];
-			nextSortedOfs[c] = next_ofs + 1;
+			const uint nextOfs = nextSortedOfs[c];
+			nextSortedOfs[c] = nextOfs + 1;
 			
-			pCodesizes[i] = cast(ubyte)(newCodesizes[next_ofs]);
+			pCodesizes[i] = cast(ubyte)(newCodesizes[nextOfs]);
 		}
 	}
 	
@@ -101,7 +101,7 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 }
 
 @nogc bool generateCodes(uint numSyms, const ubyte* pCodesizes, ushort* pCodes){
-	uint numCodes[cMaxExpectedCodeSize + 1];
+	uint[cMaxExpectedCodeSize + 1] numCodes;
 	//utils::zero_object(num_codes);
 	
 	for (uint i = 0; i < numSyms; i++){
@@ -112,7 +112,7 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 	
 	uint code = 0;
 	
-	uint nextCode[cMaxExpectedCodeSize + 1];
+	uint[cMaxExpectedCodeSize + 1] nextCode;
 	nextCode[0] = 0;
 	
 	for (uint i = 1; i <= cMaxExpectedCodeSize; i++){
@@ -144,14 +144,14 @@ static @nogc bool limitMaxCodeSize(uint numSyms, ubyte* pCodesizes, uint maxCode
 }
 
 bool generateDecoderTables(uint numSyms, const ubyte* pCodesizes, DecoderTables pTables, uint tableBits){
-	uint minCodes[cMaxExpectedCodeSize];
+	uint[cMaxExpectedCodeSize] minCodes;
 	
 	if ((!numSyms) || (tableBits > cMaxTableBits))
 		return false;
 	
 	pTables.numSyms = numSyms;
 	
-	uint numCodes[cMaxExpectedCodeSize + 1];
+	uint[cMaxExpectedCodeSize + 1] numCodes;
 	//utils::zero_object(num_codes);
 	
 	for (uint i = 0; i < numSyms; i++){
@@ -159,12 +159,12 @@ bool generateDecoderTables(uint numSyms, const ubyte* pCodesizes, DecoderTables 
 		numCodes[c]++;
 	}
 	
-	uint sortedPositions[cMaxExpectedCodeSize + 1];
+	uint[cMaxExpectedCodeSize + 1] sortedPositions;
 	
-	uint nextCode = 0;
+	uint nextCode;
 	
-	uint totalUsedSyms = 0;
-	uint maxCodeSize = 0;
+	uint totalUsedSyms;
+	uint maxCodeSize;
 	uint minCodeSize = uint.max;
 	for (uint i = 1; i <= cMaxExpectedCodeSize; i++){
 		const uint n = numCodes[i];
@@ -196,7 +196,7 @@ bool generateDecoderTables(uint numSyms, const ubyte* pCodesizes, DecoderTables 
 		pTables.curSortedSymbolOrderSize = totalUsedSyms;
 		
 		if(!isPowerOf2(totalUsedSyms)){
-			uint nP2 = nextPow2(totalUsedSyms);
+			const uint nP2 = nextPow2(totalUsedSyms);
 			pTables.curSortedSymbolOrderSize = numSyms > nP2 ? nP2 : numSyms;
 		}
 		if(pTables.sortedSymbolOrder.length){
@@ -223,7 +223,7 @@ bool generateDecoderTables(uint numSyms, const ubyte* pCodesizes, DecoderTables 
 	pTables.tableBits = tableBits;
 	
 	if(tableBits){
-		uint tableSize = 1 << tableBits;
+		const uint tableSize = 1 << tableBits;
 		if(tableSize > pTables.curLookupSize){
 			pTables.curLookupSize = tableSize;
 			if (pTables.lookup.length){
@@ -308,8 +308,8 @@ public class DecoderTables{
 	ubyte minCodeSize;
 	ubyte maxCodeSize;
 
-	uint maxCodes[cMaxExpectedCodeSize + 1];
-	int valPtrs[cMaxExpectedCodeSize + 1];
+	uint[cMaxExpectedCodeSize + 1] maxCodes;
+	int[cMaxExpectedCodeSize + 1] valPtrs;
 
 	uint curLookupSize;
 	uint[] lookup;

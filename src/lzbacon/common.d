@@ -77,11 +77,11 @@ enum LZHAMTableUpdateRate{
  * The seed buffer's contents and size must match the seed buffer used during decompression.
  */
 struct LZHAMCompressionParameters{
-	uint struct_size;            /// set to LZHAMCompressionParameters.sizeOf
-	uint dictSizeLog2;         /// set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
-	LZHAMCompressLevel level;          /// set to LZHAM_COMP_LEVEL_FASTEST, etc.
-	uint tableUpdateRate;		/// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
-	int maxHelperThreads;      /// max # of additional "helper" threads to create, must range between [-1,LZHAM_MAX_HELPER_THREADS], where -1=max practical
+	uint struct_size = this.sizeof;            /// set to LZHAMCompressionParameters.sizeOf
+	uint dictSizeLog2 = LZHAM_MIN_DICT_SIZE_LOG2;         /// set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
+	LZHAMCompressLevel level = LZHAMCompressLevel.DEFAULT;          /// set to LZHAM_COMP_LEVEL_FASTEST, etc.
+	uint tableUpdateRate = LZHAMTableUpdateRate.DEFAULT;		/// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
+	int maxHelperThreads = -1;      /// max # of additional "helper" threads to create, must range between [-1,LZHAM_MAX_HELPER_THREADS], where -1=max practical
 	uint compressFlags;         /// optional compression flags (see lzham_compress_flags enum)
 	uint numSeedBytes;         /// for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
 	void* pSeedBytes;             /// for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long
@@ -139,9 +139,9 @@ enum LZHAMDecompressFlags{
 }
 /// Stores decompression parameters
 struct LZHAMDecompressionParameters{
-	uint structSize;            /// set to sizeof(lzham_decompress_params)
-	uint dictSizeLog2;         /// set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
-	uint tableUpdateRate;		/// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
+	uint structSize = this.sizeof;            /// set to sizeof(lzham_decompress_params)
+	uint dictSizeLog2 = LZHAM_MIN_DICT_SIZE_LOG2;         /// set to the log2(dictionary_size), must range between [LZHAM_MIN_DICT_SIZE_LOG2, LZHAM_MAX_DICT_SIZE_LOG2_X86] for x86 LZHAM_MAX_DICT_SIZE_LOG2_X64 for x64
+	uint tableUpdateRate = LZHAMTableUpdateRate.DEFAULT;		/// Controls tradeoff between ratio and decompression throughput. 0=default, or [1,LZHAM_MAX_TABLE_UPDATE_RATE], higher=faster but lower ratio.
 	uint decompressFlags;       /// optional decompression flags (see lzham_decompress_flags enum)
 	uint numSeedBytes;         /// for delta compression (optional) - number of seed bytes pointed to by m_pSeed_bytes
 	void *seedBytes;             /// for delta compression (optional) - pointer to seed bytes buffer, must be at least m_num_seed_bytes long

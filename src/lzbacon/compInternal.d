@@ -9,6 +9,7 @@ import lzbacon.checksum;
 
 import core.stdc.string;
 import core.stdc.stdlib;
+import core.sync.semaphore;
 
 const uint cMaxParseGraphNodes = 3072;
 const uint cMaxParseThreads = 8;
@@ -67,7 +68,7 @@ struct CompSettings{
 	}
 }
 
-static const CompSettings sLevelSetting[] = [
+static const CompSettings[] sLevelSetting = [
 	CompSettings(8,true,2,1),
 	CompSettings(24,true,6,12),
 	CompSettings(32,false,uint.max,16),
@@ -127,11 +128,11 @@ public class LZCompressor : CLZBase{
 		 m_dict_size_log2 = 22;
 		 m_block_size = cDefaultBlockSize;
 		 }*/
-		void init(){
+		/*void init(){
 			m_compression_level = LZHAMCompressLevel.DEFAULT;
 			m_dict_size_log2 = 22;
 			m_block_size = cDefaultBlockSize;
-		}
+		}*/
 	}
 	private class LZDecision{
 		int pos;  // dict position where decision was evaluated
@@ -230,7 +231,7 @@ public class LZCompressor : CLZBase{
 	private abstract class StateBase{
 		uint m_cur_ofs;
 		uint m_cur_state;
-		uint m_match_hist[CLZBase.cMatchHistSize];
+		uint[CLZBase.cMatchHistSize] m_match_hist;
 		
 		bool opEquals (const StateBase rhs) const{
 			if (m_cur_state != rhs.m_cur_state)
@@ -318,8 +319,8 @@ public class LZCompressor : CLZBase{
 		QuasiAdaptiveHuffmanDataModel m_delta_lit_table;
 		
 		QuasiAdaptiveHuffmanDataModel m_main_table;
-		QuasiAdaptiveHuffmanDataModel m_rep_len_table[2];
-		QuasiAdaptiveHuffmanDataModel m_large_len_table[2];
+		QuasiAdaptiveHuffmanDataModel[2] m_rep_len_table;
+		QuasiAdaptiveHuffmanDataModel[2] m_large_len_table;
 		QuasiAdaptiveHuffmanDataModel m_dist_lsb_table;
 		
 		this(){
@@ -327,13 +328,22 @@ public class LZCompressor : CLZBase{
 			m_match_hist[1] = 1;
 			m_match_hist[2] = 1;
 			m_match_hist[3] = 1;
+			m_lit_table = new RawQuasiAdaptiveHuffmanDataModel();
+			m_delta_lit_table = new RawQuasiAdaptiveHuffmanDataModel();
+
+			m_main_table = new RawQuasiAdaptiveHuffmanDataModel();
+			m_rep_len_table[0] = new RawQuasiAdaptiveHuffmanDataModel();
+			m_rep_len_table[1] = new RawQuasiAdaptiveHuffmanDataModel();
+			m_large_len_table[0] = new RawQuasiAdaptiveHuffmanDataModel();
+			m_large_len_table[1] = new RawQuasiAdaptiveHuffmanDataModel();
+			m_dist_lsb_table = new RawQuasiAdaptiveHuffmanDataModel();
 		}
 		void clear(){
 			m_cur_ofs = 0;
 			m_cur_state = 0;
 			m_block_start_dict_ofs = 0;
 			
-			for (uint i = 0; i < 2; i++)
+			for (uint i ; i < 2; i++)
 			{
 				m_rep_len_table[i].clear();
 				m_large_len_table[i].clear();
@@ -1504,13 +1514,14 @@ public class LZCompressor : CLZBase{
 		enum { 
 			cMaxNodeStates = 4 
 		}
-		NodeState m_node_states[cMaxNodeStates];
+		NodeState[cMaxNodeStates] m_node_states;
 		
 		@nogc void clear(){
 			m_num_node_states = 0;
 		}
 		
-		void add_state(int parentIndex, int parentStateIndex, LZDecision lzdec, State parentState, ulong totalCost, uint totalComplexity){
+		void add_state(int parentIndex, int parentStateIndex, LZDecision lzdec, State parentState, ulong totalCost, 
+				uint totalComplexity){
 			StateBase trialState;
 			parentState.save_partial_state(trialState);
 			trialState.partial_advance(lzdec);
@@ -1581,7 +1592,7 @@ public class LZCompressor : CLZBase{
 		
 		State m_initial_state;
 		
-		Node m_nodes[cMaxParseGraphNodes + 1];
+		Node[cMaxParseGraphNodes + 1] m_nodes;
 		
 		LZDecision[] m_best_decisions;
 		bool m_emit_decisions_backwards;
@@ -1596,10 +1607,10 @@ public class LZCompressor : CLZBase{
 		bool m_failed;
 	}
 	private uint m_num_parse_threads;
-	private ParseThreadState m_parse_thread_state[cMaxParseThreads + 1]; // +1 extra for the greedy parser thread (only used for delta compression)
+	private ParseThreadState[cMaxParseThreads + 1] m_parse_thread_state; /// +1 extra for the greedy parser thread (only used for delta compression)
 	
 	private uint m_parse_jobs_remaining;
-	//semaphore m_parse_jobs_complete;
+	Semaphore m_parse_jobs_complete;
 	
 	private enum { 
 		cMaxBlockHistorySize = 6, 
@@ -1612,14 +1623,16 @@ public class LZCompressor : CLZBase{
 		bool m_raw_block;
 		bool m_reset_update_rate;
 	}
-	private BlockHistory m_block_history[cMaxBlockHistorySize];
+	private BlockHistory[cMaxBlockHistorySize] m_block_history;
 	private uint m_block_history_size;
 	private uint m_block_history_next;
-	
+	/// Constructor
 	this(){
 		m_src_size = -1;
-		//m_parse_jobs_complete
-		
+		m_parse_jobs_complete = new Semaphore();
+		m_codec = new SymbolCodec();
+		m_state = new State();
+		m_accel = new SearchAccelerator();
 	}
 	/// See http://www.gzip.org/zlib/rfc-zlib.html
 	/// Method is set to 14 (LZHAM) and CINFO is (window_size - 15).
@@ -1772,13 +1785,15 @@ public class LZCompressor : CLZBase{
 		
 		uint curDictOfs = parseState.m_start_ofs;
 		uint curLookaheadOfs = curDictOfs - lookaheadStartOfs;
-		uint curNodeIndex = 0;
+		uint curNodeIndex;
 		
-		enum { cMaxFullMatches = cMatchAccelMaxSupportedProbes };
-		uint matchLens[cMaxFullMatches];
-		uint matchDistances[cMaxFullMatches];
+		enum { 
+			cMaxFullMatches = cMatchAccelMaxSupportedProbes 
+		}
+		uint[cMaxFullMatches] matchLens;
+		uint[cMaxFullMatches] matchDistances;
 		
-		ulong lzdec_bitcosts[cMaxMatchLen + 1];
+		ulong[cMaxMatchLen + 1] lzdec_bitcosts;
 		
 		Node prevLitNode;
 		prevLitNode.clear();
@@ -1787,7 +1802,7 @@ public class LZCompressor : CLZBase{
 			Node* curNode = &pNodes[curNodeIndex];
 			
 			//const uint max_admissable_match_len = LZHAM_MIN(static_cast<uint>(CLZBase::cMaxMatchLen), bytesToParse - curNodeIndex);
-			uint helperval = bytesToParse - curNodeIndex;
+			const uint helperval = bytesToParse - curNodeIndex;
 			const uint maxAdmissableMatchLen = cast(uint)(CLZBase.cMaxMatchLen) > helperval ? helperval : cast(uint)(CLZBase.cMaxMatchLen);
 			const uint findDictSize = m_accel.get_cur_dict_size() + curLookaheadOfs;
 			
@@ -1796,9 +1811,9 @@ public class LZCompressor : CLZBase{
 			const ubyte* pLookahead = &m_accel.m_dict[curDictOfs];
 			
 			// full matches
-			uint maxFullMatchLen = 0;
-			uint numFullMatches = 0;
-			uint len2MatchDist = 0;
+			uint maxFullMatchLen;
+			uint numFullMatches;
+			uint len2MatchDist;
 			
 			if (maxAdmissableMatchLen >= CLZBase.cMinMatchLen){
 				DictMatch* pMatches = m_accel.find_matches(curLookaheadOfs);
@@ -1865,7 +1880,7 @@ public class LZCompressor : CLZBase{
 						for (uint l = matchHistMinMatchLen; l <= histMatchLen; l++){
 							Node* dstNode = &curNode[l];
 							
-							ulong repMatchTotalCost = curNodeTotalCost + lzdec_bitcosts[l];
+							const ulong repMatchTotalCost = curNodeTotalCost + lzdec_bitcosts[l];
 							
 							dstNode.add_state(curNodeIndex, curNodeStateIndex, new LZDecision(curDictOfs, l, -1 * (cast(int)repMatchIndex + 1)), approxState, repMatchTotalCost, repMatchTotalComplexity);
 						}
@@ -1879,7 +1894,7 @@ public class LZCompressor : CLZBase{
 				// nearest len2 match
 				if (len2MatchDist){
 					LZDecision lzdec = new LZDecision(curDictOfs, 2, len2MatchDist);
-					ulong actualCost = approxState.get_cost(this, m_accel, lzdec);
+					const ulong actualCost = approxState.get_cost(this, m_accel, lzdec);
 					curNode[2].add_state(curNodeIndex, curNodeStateIndex, lzdec, approxState, curNodeTotalCost + actualCost, curNodeTotalComplexity + cShortMatchComplexity);
 					
 					//minTruncateMatchLen = LZHAM_MAX(minTruncateMatchLen, 2);
@@ -1891,11 +1906,11 @@ public class LZCompressor : CLZBase{
 					//uint prevMaxMatchLen = LZHAM_MAX(1, minTruncateMatchLen);
 					uint prevMaxMatchLen = 1 > minTruncateMatchLen ? 1 : minTruncateMatchLen;
 					for (uint fullMatchIndex = 0; fullMatchIndex < numFullMatches; fullMatchIndex++){
-						uint endLen = matchLens[fullMatchIndex];
+						const uint endLen = matchLens[fullMatchIndex];
 						if (endLen <= minTruncateMatchLen)
 							continue;
 						
-						uint startLen = prevMaxMatchLen + 1;
+						const uint startLen = prevMaxMatchLen + 1;
 						uint matchDist = matchDistances[fullMatchIndex];
 						
 						assert(startLen <= endLen);
@@ -2003,7 +2018,7 @@ public class LZCompressor : CLZBase{
 		uint curLookaheadOfs = curDictOfs - lookaheadStartOfs;
 		uint curNodeIndex = 0;
 		
-		enum { cMaxFullMatches = cMatchAccelMaxSupportedProbes };
+		enum { cMaxFullMatches = cMatchAccelMaxSupportedProbes }
 		uint[cMaxFullMatches] matchLens;
 		uint[cMaxFullMatches] matchDistances;
 		
@@ -2427,11 +2442,11 @@ public class LZCompressor : CLZBase{
 		
 		//LZHAM_MEMORY_EXPORT_BARRIER
 		
-		/*if (atomic_decrement32(&m_parse_jobs_remaining) == 0){
-		 m_parse_jobs_complete.release();
-		 }*/
-		/*if(--m_parse_jobs_remaining == 0)
-		 m_parse_jobs_complete.release();*/
+		if (--(m_parse_jobs_remaining) == 0){
+			m_parse_jobs_complete.tryWait();
+		}
+		if(--m_parse_jobs_remaining == 0)
+			m_parse_jobs_complete.tryWait();
 	}
 	bool compress_block(void* pBuf, uint bufLen){
 		uint curOfs = 0;
@@ -2726,7 +2741,7 @@ public class LZCompressor : CLZBase{
 					{
 						//scoped_perf_section wait_timer("waiting for jobs");
 						
-						//m_parse_jobs_complete.wait();
+						m_parse_jobs_complete.wait();
 					}
 				}else{
 					m_parse_jobs_remaining = int.max;
@@ -3038,7 +3053,8 @@ public class LZCompressor : CLZBase{
 		}
 		int numParseJobs = m_num_parse_threads - 1;
 		//uint match_accel_helper_threads = LZHAM_MAX(0, (int)m_params.m_max_helper_threads - num_parse_jobs);
-		uint matchAccelHelperThreads = 0 > cast(int)(m_params.m_max_helper_threads - numParseJobs) ? 0 : cast(int)(m_params.m_max_helper_threads - numParseJobs);
+		uint matchAccelHelperThreads = 0 > cast(int)(m_params.m_max_helper_threads - numParseJobs) ? 0 : 
+				cast(int)(m_params.m_max_helper_threads - numParseJobs);
 		
 		assert(m_num_parse_threads >= 1);
 		assert(m_num_parse_threads <= cMaxParseThreads);
@@ -3049,7 +3065,8 @@ public class LZCompressor : CLZBase{
 			assert((matchAccelHelperThreads + (m_num_parse_threads - 1)) <= m_params.m_max_helper_threads);
 		}
 		
-		if (!m_accel.init(this, /*params.m_pSeed_bytes,*/ matchAccelHelperThreads, dictSize, m_settings.m_match_accel_max_matches_per_probe, false, m_settings.m_match_accel_max_probes))
+		if (!m_accel.init(this, /*params.m_pSeed_bytes,*/ matchAccelHelperThreads, dictSize, 
+				m_settings.m_match_accel_max_matches_per_probe, false, m_settings.m_match_accel_max_probes))
 			return false;
 		
 		initPositionSlots(params.m_dict_size_log2);
@@ -3108,7 +3125,10 @@ public class LZCompressor : CLZBase{
 		
 		for (uint i = 0; i < cMaxParseThreads; i++){
 			ParseThreadState* parseState = &m_parse_thread_state[i];
-			parseState.m_initial_state.clear();
+			if(parseState.m_initial_state is null)
+				parseState.m_initial_state = new State();
+			else
+				parseState.m_initial_state.clear();
 			
 			for (uint j = 0; j <= cMaxParseGraphNodes; j++)
 				parseState.m_nodes[j].clear();

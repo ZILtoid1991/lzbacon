@@ -23,6 +23,7 @@ enum{
 		a += *pBuf;
 		b += a;
 		pBuf++;
+		buflen--;
 	}
 	a = a % ADLER_MOD;
 	b = b % ADLER_MOD;

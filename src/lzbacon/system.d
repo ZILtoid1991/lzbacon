@@ -1,6 +1,11 @@
 module lzbacon.system;
 
 import core.stdc.string;
+import core.stdc.stdlib;
+import conv = std.conv;
+version (Windows){
+	import win = core.sys.windows.windows;
+}
 
 version(X86_64){
 	static enum CPU_64BIT_CAPABLE = true;
@@ -106,7 +111,9 @@ public @nogc T nextPow2(T)(T val){
 	val |= val >> 1;
 	return val + 1;
 }
-
+/**
+ * Converts a pointer and length identifier pair to D array for interoperability.
+ */
 public T[] ptrToArray(T)(T* ptr, size_t length){
 	return ptr[0 .. length];
 }
@@ -128,8 +135,16 @@ public T[] ptrToArray(T)(T* ptr, size_t length){
 @nogc T minimum(T)(T a, T b){
 	return a > b ? a : b;
 }
-
-/*@nogc long atomic_decrement32(atomic32_t pDest){
-	LZHAM_ASSERT((reinterpret_cast<ptr_bits_t>(pDest) & 3) == 0);
-	return (*pDest -= 1);
-}*/
+version(Windows){
+	/**
+	 * Get Windows error message
+	 */
+	public string formatSysErrorMessage(win.DWORD errCode){
+		win.LPSTR errMsg;
+		win.FormatMessageA(win.FORMAT_MESSAGE_FROM_SYSTEM | win.FORMAT_MESSAGE_FROM_HMODULE | 
+				win.FORMAT_MESSAGE_ALLOCATE_BUFFER, null, errCode, win.LANG_SYSTEM_DEFAULT, errMsg, 0 , null);
+		string errMsgOut = conv.to!string(errMsg);
+		free(errMsg);
+		return errMsgOut;
+	}
+}

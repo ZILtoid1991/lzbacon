@@ -4,4 +4,11 @@ authors "Laszlo Szeremi"
 copyright "Copyright © 2018, Laszlo Szeremi"
 license "Boost"
 targetType "library"
-targetPath "$DUB_TARGET_TYPE/$DUB_BUILD_TYPE/$DUB_ARCH/"
+targetPath "lib/"
+subPackage {
+	name "application"
+	targetType "executable"
+	targetPath "bin/"
+	sourcePaths "appsrc/"
+	dependency "lzbacon" version="*"
+}

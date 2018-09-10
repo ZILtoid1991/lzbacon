@@ -25,7 +25,7 @@ struct SymFreq{
 
 static @nogc SymFreq* radixSortSyms(uint numSyms, SymFreq* syms0, SymFreq* syms1){
 	const uint cMaxPasses = 2;
-	uint hist[256 * cMaxPasses];
+	uint[256 * cMaxPasses] hist;
 
 	{
 		SymFreq* p = syms0;
@@ -55,7 +55,7 @@ static @nogc SymFreq* radixSortSyms(uint numSyms, SymFreq* syms0, SymFreq* syms1
 	for(uint pass ; pass < totalPasses ; pass++){
 		uint* pHist = &hist[pass << 8];
 
-		uint offsets[256];
+		uint[256] offsets;
 
 		uint cur_ofs = 0;
 		for(int i ; i < 256 ; i+=2){

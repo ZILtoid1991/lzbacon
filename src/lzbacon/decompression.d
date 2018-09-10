@@ -15,7 +15,7 @@ import core.thread;
 
 import std.bitmanip;
 
-static const ubyte sLiteralNextState[24] =
+static const ubyte[24] sLiteralNextState =
 [
 	0, 0, 0, 0, 1, 2, 3, // 0-6: literal states
 	4, 5, 6, 4, 5,       // 7-11: match states
@@ -24,8 +24,8 @@ static const ubyte sLiteralNextState[24] =
 enum{
 	LZHAM_CR_INITIAL_STATE = 0,
 }
-static const uint sHugeMatchBaseLen[4] = [ CLZDecompBase.cMaxMatchLen + 1, CLZDecompBase.cMaxMatchLen + 1 + 256, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024 + 4096 ];
-static const ubyte sHugeMatchCodeLen[4] = [ 8, 10, 12, 16 ];
+static const uint[4] sHugeMatchBaseLen = [ CLZDecompBase.cMaxMatchLen + 1, CLZDecompBase.cMaxMatchLen + 1 + 256, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024, CLZDecompBase.cMaxMatchLen + 1 + 256 + 1024 + 4096 ];
+static const ubyte[4] sHugeMatchCodeLen = [ 8, 10, 12, 16 ];
 /**
  * Decompression codec implementation.
  */
@@ -61,16 +61,16 @@ public class LZHAMDecompressor : Fiber{
 	RawQuasiAdaptiveHuffmanDataModel litTable;
 	RawQuasiAdaptiveHuffmanDataModel deltaLitTable;
 	RawQuasiAdaptiveHuffmanDataModel mainTable;
-	RawQuasiAdaptiveHuffmanDataModel repLenTable[2];
-	RawQuasiAdaptiveHuffmanDataModel largeLenTable[2];
+	RawQuasiAdaptiveHuffmanDataModel[2] repLenTable;
+	RawQuasiAdaptiveHuffmanDataModel[2] largeLenTable;
 	RawQuasiAdaptiveHuffmanDataModel distLsbTable;
 	
-	AdaptiveBitModel isMatchModel[CLZDecompBase.cNumStates];
-	AdaptiveBitModel isRepModel[CLZDecompBase.cNumStates];
-	AdaptiveBitModel isRep0Model[CLZDecompBase.cNumStates];
-	AdaptiveBitModel isRep0SingleByteModel[CLZDecompBase.cNumStates];
-	AdaptiveBitModel isRep1Model[CLZDecompBase.cNumStates];
-	AdaptiveBitModel isRep2Model[CLZDecompBase.cNumStates];
+	AdaptiveBitModel[CLZDecompBase.cNumStates] isMatchModel;
+	AdaptiveBitModel[CLZDecompBase.cNumStates] isRepModel;
+	AdaptiveBitModel[CLZDecompBase.cNumStates] isRep0Model;
+	AdaptiveBitModel[CLZDecompBase.cNumStates] isRep0SingleByteModel;
+	AdaptiveBitModel[CLZDecompBase.cNumStates] isRep1Model;
+	AdaptiveBitModel[CLZDecompBase.cNumStates] isRep2Model;
 	
 	uint dstOfs;
 	uint dstHighwaterOfs;

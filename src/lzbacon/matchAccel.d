@@ -31,7 +31,7 @@ struct DictMatch{
 }
 
 class SearchAccelerator{
-	static ubyte gHammingDist[256] =
+	static ubyte[256] gHammingDist =
 	[
 		0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
 			1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
@@ -215,7 +215,7 @@ class SearchAccelerator{
 		//LZHAM_NOTE_UNUSED(pData_ptr);
 		const uint threadIndex = cast(uint)data;
 		
-		DictMatch tempMatches[cMatchAccelMaxSupportedProbes * 2];
+		DictMatch[cMatchAccelMaxSupportedProbes * 2] tempMatches;
 		
 		uint fillLookaheadPos = this.m_fill_lookahead_pos;
 		uint fillDictSize = this.m_fill_dict_size;
@@ -475,7 +475,7 @@ class SearchAccelerator{
 			
 			/*if (!m_pTask_pool->queue_multiple_object_tasks(this, &search_accelerator.find_all_matches_callback, 0, m_max_helper_threads))
 				return false;*/
-			int currentThreads[];
+			int[] currentThreads;
 			currentThreads.length = m_max_helper_threads;
 			//I might need this in the future
 			for(int i; i < currentThreads.length; i++){

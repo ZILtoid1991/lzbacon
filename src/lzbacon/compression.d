@@ -9,6 +9,8 @@ import lzbacon.system;
 import core.stdc.stdlib;
 import core.stdc.string;
 
+import conv = std.conv;
+
 static LZHAMCompressionStatus create_internal_init_params(LZCompressor.InitParams* internalParams, const LZHAMCompressionParameters* pParams){
 	if ((pParams.dictSizeLog2 < CLZBase.cMinDictSizeLog2) || (pParams.dictSizeLog2 > CLZBase.cMaxDictSizeLog2))
 		return LZHAMCompressionStatus.INVALID_PARAMETER;
@@ -524,4 +526,12 @@ struct LZHAMCompressState{
 	bool finishedCompression;
 	LZHAMCompressionParameters params;
 	LZHAMCompressionStatus status;
+	public string toString(){
+		return "[compressor:" ~ conv.to!string(compressor) ~ ";dictSizeLog2:" ~ conv.to!string(dictSizeLog2) ~ ";inBuf:" 
+		~ conv.to!string(inBuf) ~ ";inBufSize:" ~ conv.to!string(inBufSize) ~ ";outBuf:" ~ conv.to!string(outBuf) ~ 
+		";outBufSize:" ~ conv.to!string(outBufSize) ~ ";compDataOfs:" ~ conv.to!string(compDataOfs) ~ ";finishedCompression:" 
+		~ conv.to!string(finishedCompression) ~ ";params:" ~ conv.to!string(params) ~ ";status:" ~
+		conv.to!string(status) ~ "]";
+
+	}
 }

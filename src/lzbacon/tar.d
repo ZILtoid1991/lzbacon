@@ -1,6 +1,7 @@
 module lzbacon.tar;
 
 import std.file;
+import std.path;
 import std.datetime;
 
 import core.stdc.string;
@@ -54,7 +55,7 @@ enum Typeflag : char{
 	symbolicLink	=	'2',
 	charDevNode		=	'3',
 	blockDevNode	=	'4',
-	directory		=	'5',
+	//directory		=	'5',
 	fifonode		=	'6',
 	reserved		=	'7',
 	directory		=	'D',
@@ -94,7 +95,7 @@ public struct TarHeader {
 	 */
 	public string getFileNameAsString(){
 		string result;
-		if(ustarext.magic = IDMagic.ustar){//include path if ustar extensions have it
+		if(ustarext.magic == IDMagic.ustar){//include path if ustar extensions have it
 			for(int i ; i < ustarext.prefix.length ; i++){
 				if(ustarext.prefix[i]=='\x00'){
 					break;
@@ -118,7 +119,7 @@ public struct TarHeader {
 	 * Technically it can store UTF8 filenames, but it's not standard and might cause compatibility issues.
 	 */
 	public int setFileName(string filename){
-		if(ustarext.magic = IDMagic.ustar){//include path if ustar extensions have it
+		if(ustarext.magic == IDMagic.ustar){//include path if ustar extensions have it
 			string directory = dirName(filename);
 			filename = baseName(filename);
 			int i;
@@ -133,7 +134,7 @@ public struct TarHeader {
 			if (i < directory.length)
 				return i - directory.length;
 			//set remaining positions to null
-			for(; i < i < ustarext.prefix.length ; i++){
+			for(; i < ustarext.prefix.length ; i++){
 				ustarext.prefix[i] = '\x00';
 			}
 		}
@@ -143,13 +144,13 @@ public struct TarHeader {
 			if(filename[i] == '\\')
 				name[i] = '/';
 			else
-				name[i] = directory[i];
+				name[i] = filename[i];
 		}
 		//return with a negative value if name is too long
 		if (i < filename.length)
 			return i - filename.length;
 		//set remaining positions to null
-		for(; i < i < name.length ; i++){
+		for(; i < name.length ; i++){
 			name[i] = '\x00';
 		}
 		return 0;
@@ -159,7 +160,7 @@ public struct TarHeader {
 	 * 95 bit implementations are not supported yet.
 	 */
 	public DateTime getMTime(){
-		//DateTime result = DateTime(1970,1,1);
+		DateTime result = DateTime(1970,1,1);
 		//Duration dur = Duration();
 		result += dur!"seconds"(parseOctal(mtime));
 		return result;
@@ -184,7 +185,7 @@ public struct TarHeader {
 	public void calculateChecksum(){
 		checksum = "        ";
 		uint chks;
-		ubyte* src = cast(ubyte)name.ptr;
+		ubyte* src = cast(ubyte*)name.ptr;
 		for(int i ; i < 512 ; i++){
 			chks += src[i];
 		}
