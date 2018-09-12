@@ -5,6 +5,7 @@ copyright "Copyright © 2018, Laszlo Szeremi"
 license "Boost"
 targetType "library"
 targetPath "lib/"
+//buildOptions "debugInfoC"
 subPackage {
 	name "application"
 	targetType "executable"

@@ -541,7 +541,7 @@ public class RawQuasiAdaptiveHuffmanDataModel{
 }
 
 
-/*
+/**
  * Currently unused due to architectural differences between c++ and D, so it's harder to predict alignments and classes are reference values.
  * Instead it's an alias for the time being
  */
@@ -554,7 +554,7 @@ alias QuasiAdaptiveHuffmanDataModel = RawQuasiAdaptiveHuffmanDataModel;
  * This might become a struct later on, since it only holds a single 16bit unsigned value
  */
 public struct AdaptiveBitModel{
-	ushort bit0Prob;
+	ushort bit0Prob = 1U << (cSymbolCodecArithProbBits - 1);
 	//this() { clear(); }
 	this(float prob0){
 		setProbability0(prob0);
@@ -590,7 +590,9 @@ public struct AdaptiveBitModel{
 		assert(bit0Prob < cSymbolCodecArithProbScale);
 	}
 
-	@nogc ulong getCost(uint bit) const{ return gProbCost[bit ? (cSymbolCodecArithProbScale - bit0Prob) : bit0Prob]; }
+	@nogc ulong getCost(uint bit) const{ 
+		return gProbCost[bit ? (cSymbolCodecArithProbScale - bit0Prob) : bit0Prob]; 
+	}
 
 }
 public class AdaptiveArithDataModel{

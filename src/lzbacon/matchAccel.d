@@ -354,7 +354,7 @@ class SearchAccelerator{
 				const uint numMatchesToWrite = numMatches < m_max_matches ? numMatches : m_max_matches;
 				
 				//const uint match_ref_ofs = cast(uint)(atomic_exchange_add(&m_next_match_ref, num_matches_to_write));
-				const uint matchRefOfs = m_next_match_ref + numMatchesToWrite;
+				const uint matchRefOfs = cast(uint)atomicExchangeAdd(cast(int*)&m_next_match_ref, numMatchesToWrite);
 				
 				memcpy(&m_matches[matchRefOfs],
 					tempMatches.ptr + (numMatches - numMatchesToWrite),
@@ -363,9 +363,9 @@ class SearchAccelerator{
 				// FIXME: This is going to really hurt on platforms requiring export barriers.
 				//LZHAM_MEMORY_EXPORT_BARRIER
 					
-				//atomic_exchange32((atomic32_t*)&m_match_refs[static_cast<uint>(fill_lookahead_pos - m_fill_lookahead_pos)], match_ref_ofs);
+				atomicExchange32(cast(int*)&m_match_refs[cast(uint)(fillLookaheadPos - m_fill_lookahead_pos)], matchRefOfs);
 			}else{
-				//atomic_exchange32((atomic32_t*)&m_match_refs[static_cast<uint>(fill_lookahead_pos - m_fill_lookahead_pos)], -2);
+				atomicExchange32(cast(int*)&m_match_refs[cast(uint)(fillLookaheadPos - m_fill_lookahead_pos)], -2);
 			}
 			
 			fillLookaheadPos++;

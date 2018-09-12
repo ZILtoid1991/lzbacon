@@ -9,6 +9,7 @@ import lzbacon.checksum;
 
 import core.stdc.string;
 import core.stdc.stdlib;
+import core.stdc.stdio;
 import core.sync.semaphore;
 
 const uint cMaxParseGraphNodes = 3072;
@@ -134,7 +135,7 @@ public class LZCompressor : CLZBase{
 			m_block_size = cDefaultBlockSize;
 		}*/
 	}
-	private class LZDecision{
+	/+package class LZDecision{
 		int pos;  // dict position where decision was evaluated
 		int len;  // 0 if literal, 1+ if match
 		int dist; // <0 if match rep, else >=1 is match dist
@@ -203,8 +204,8 @@ public class LZCompressor : CLZBase{
 			else
 				return CLZBase.cMinMatchLen;
 		}
-	}
-	class LZPricedDecision : LZDecision{
+	}+/
+	/+class LZPricedDecision : LZDecision{
 		ulong cost;
 		@nogc this() { 
 			super();
@@ -227,7 +228,87 @@ public class LZCompressor : CLZBase{
 		}
 		
 		//bit_cost_t m_cost;
+	}+/
+	/**
+	 * Mixed LZDecision and LZPricedDecision to avoid extra allocation and garbage management
+	 */
+	private struct LZDecision{
+		int pos;  /// dict position where decision was evaluated
+		int len;  /// 0 if literal, 1+ if match
+		int dist; /// <0 if match rep, else >=1 is match dist
+		ulong cost;	/// from LZPricedDecision
+		//@nogc this() { }
+		@nogc this(int pos, int len, int dist, ulong cost = 0){ 
+			this.pos = pos; 
+			this.len = len; 
+			this.dist = dist;
+			this.cost = cost;
+		}
+		
+		@nogc void init(int pos, int len, int dist, ulong cost = 0) { 
+			this.pos = pos; 
+			this.len = len; 
+			this.dist = dist; 
+			this.cost = cost;
+		}
+		
+		@nogc bool isLit() const { 
+			return !len; 
+		}
+		@nogc bool isMatch() const { 
+			return len > 0; 
+		} // may be a rep or full match
+		@nogc bool isFullMatch() const { 
+			return (len > 0) && (dist >= 1); 
+		}
+		@nogc uint getLen() const { 
+			//return math::maximum<uint>(m_len, 1); 
+			return len > 1 ? len : 1;
+		}
+		@nogc bool isRep() const { 
+			return dist < 0; 
+		}
+		@nogc bool isRep0() const { 
+			return dist == -1; 
+		}
+		
+		uint get_match_dist(const State cur_state) const{
+			if (!isMatch())
+				return 0;
+			else if (isRep()){
+				int index = -1 * dist - 1;
+				assert(index < CLZBase.cMatchHistSize);
+				return cur_state.m_match_hist[index];
+			}else
+				return dist;
+		}
+		
+		@nogc uint getComplexity() const{
+			if (isLit())
+				return cLitComplexity;
+			else if (isRep())
+			{
+				assert(cRep0Complexity == 2);
+				return 1 + -dist;  // 2, 3, 4, or 5
+			}
+			else if (getLen() >= cLongMatchComplexityLenThresh)
+				return cLongMatchComplexity;
+			else
+				return cShortMatchComplexity;
+		}
+		
+		@nogc uint get_min_codable_len() const{
+			if (isLit() || isRep0())
+				return 1;
+			else
+				return CLZBase.cMinMatchLen;
+		}
+
+		@nogc ulong getCost() const { 
+			return cost; 
+		}
 	}
+	alias LZPricedDecision = LZDecision;
 	private abstract class StateBase{
 		uint m_cur_ofs;
 		uint m_cur_state;
@@ -293,6 +374,8 @@ public class LZCompressor : CLZBase{
 		}
 		
 		void save_partial_state(StateBase dst){
+			if(dst is null)
+				dst = new State();
 			dst.m_cur_ofs = m_cur_ofs;
 			dst.m_cur_state = m_cur_state;
 			memcpy(dst.m_match_hist.ptr, m_match_hist.ptr, m_match_hist.sizeof);
@@ -592,7 +675,8 @@ public class LZCompressor : CLZBase{
 			return cost;
 		}
 		// Returns actual cost.
-		void get_rep_match_costs(uint dict_pos, ulong *pBitcosts, uint matchHistIndex, int minLen, int maxLen, uint isMatchModelIndex) const{
+		void get_rep_match_costs(uint dict_pos, ulong *pBitcosts, uint matchHistIndex, int minLen, int maxLen, 
+				uint isMatchModelIndex) const{
 			// match
 			
 			const QuasiAdaptiveHuffmanDataModel repLenTable = m_rep_len_table[m_cur_state >= CLZBase.cNumLitStates];
@@ -1486,36 +1570,43 @@ public class LZCompressor : CLZBase{
 	private bool m_finished;
 	private bool m_use_task_pool;
 	
-	private struct NodeState{
-		@nogc void clear()
-		{
-			m_total_cost = cBitCostMax; //math::cNearlyInfinite;
-			m_total_complexity = uint.max;
-		}
+	private class NodeState{
 		
-		// the lzdecision that led from parent to this node_state
+		/// the lzdecision that led from parent to this node_state
 		LZDecision m_lzdec;                 
 		
-		// This is either the state of the parent node (optimal parsing), or the state of the child node (extreme parsing).
+		/// This is either the state of the parent node (optimal parsing), or the state of the child node (extreme parsing).
 		StateBase m_saved_state;     
 		
-		// Total cost to arrive at this node state.
+		/// Total cost to arrive at this node state.
 		ulong m_total_cost;                 
 		uint m_total_complexity;
 		
-		// Parent node index.
+		/// Parent node index.
 		short m_parent_index;               
 		
-		// Parent node state index (only valid when extreme parsing).
-		byte m_parent_state_index;          
+		/// Parent node state index (only valid when extreme parsing).
+		byte m_parent_state_index;
+		this(){
+			m_saved_state = new State();
+			clear();
+		}
+		@nogc void clear(){
+			m_total_cost = cBitCostMax; //math::cNearlyInfinite;
+			m_total_complexity = uint.max;
+		}
 	}
-	private struct Node{
+	private class Node{
 		uint m_num_node_states;                                    
 		enum { 
 			cMaxNodeStates = 4 
 		}
 		NodeState[cMaxNodeStates] m_node_states;
-		
+		this(){
+			for(int i ; i < m_node_states.length ; i++){
+				m_node_states = new NodeState();
+			}
+		}
 		@nogc void clear(){
 			m_num_node_states = 0;
 		}
@@ -1586,7 +1677,7 @@ public class LZCompressor : CLZBase{
 			m_num_node_states = m_num_node_states + 1 > cast(uint)(cMaxNodeStates) ? cast(uint)(cMaxNodeStates) : m_num_node_states + 1;
 		}
 	}
-	private align(128) struct ParseThreadState{
+	private class ParseThreadState{
 		uint m_start_ofs;
 		uint m_bytes_to_match;
 		
@@ -1605,6 +1696,21 @@ public class LZCompressor : CLZBase{
 		
 		bool m_issue_reset_state_partial;
 		bool m_failed;
+		this(){
+			for(int i; i < m_nodes.length; i++){
+				m_nodes[i] = new Node();
+			}
+		}
+		NodeState[] getAllNodeStates(){
+			NodeState[] result;
+			result.reserve((cMaxParseGraphNodes + 1) * Node.cMaxNodeStates);
+			foreach(node; m_nodes){
+				foreach(nodeSt; node.m_node_states){
+					result ~= nodeSt;
+				}
+			}
+			return result;
+		}
 	}
 	private uint m_num_parse_threads;
 	private ParseThreadState[cMaxParseThreads + 1] m_parse_thread_state; /// +1 extra for the greedy parser thread (only used for delta compression)
@@ -1633,6 +1739,8 @@ public class LZCompressor : CLZBase{
 		m_codec = new SymbolCodec();
 		m_state = new State();
 		m_accel = new SearchAccelerator();
+		for(int i ; i < m_parse_thread_state.length ; i++)
+			m_parse_thread_state[i] = new ParseThreadState();
 	}
 	/// See http://www.gzip.org/zlib/rfc-zlib.html
 	/// Method is set to 14 (LZHAM) and CINFO is (window_size - 15).
@@ -1874,7 +1982,8 @@ public class LZCompressor : CLZBase{
 					if (histMatchLen >= matchHistMinMatchLen){
 						//matchHistMaxLen = math::maximum(matchHistMaxLen, histMatchLen);
 						
-						approxState.get_rep_match_costs(curDictOfs, lzdec_bitcosts.ptr, repMatchIndex, matchHistMinMatchLen, histMatchLen, isMatchModelIndex);
+						approxState.get_rep_match_costs(curDictOfs, lzdec_bitcosts.ptr, repMatchIndex, matchHistMinMatchLen, histMatchLen,
+								isMatchModelIndex);
 						
 						uint repMatchTotalComplexity = curNodeTotalComplexity + (cRep0Complexity + repMatchIndex);
 						for (uint l = matchHistMinMatchLen; l <= histMatchLen; l++){
@@ -1882,7 +1991,8 @@ public class LZCompressor : CLZBase{
 							
 							const ulong repMatchTotalCost = curNodeTotalCost + lzdec_bitcosts[l];
 							
-							dstNode.add_state(curNodeIndex, curNodeStateIndex, new LZDecision(curDictOfs, l, -1 * (cast(int)repMatchIndex + 1)), approxState, repMatchTotalCost, repMatchTotalComplexity);
+							dstNode.add_state(curNodeIndex, curNodeStateIndex, LZDecision(curDictOfs, l, -1 * (cast(int)repMatchIndex + 1)), 
+									approxState, repMatchTotalCost, repMatchTotalComplexity);
 						}
 					}
 					
@@ -1893,9 +2003,10 @@ public class LZCompressor : CLZBase{
 				
 				// nearest len2 match
 				if (len2MatchDist){
-					LZDecision lzdec = new LZDecision(curDictOfs, 2, len2MatchDist);
+					LZDecision lzdec = LZDecision(curDictOfs, 2, len2MatchDist);
 					const ulong actualCost = approxState.get_cost(this, m_accel, lzdec);
-					curNode[2].add_state(curNodeIndex, curNodeStateIndex, lzdec, approxState, curNodeTotalCost + actualCost, curNodeTotalComplexity + cShortMatchComplexity);
+					curNode[2].add_state(curNodeIndex, curNodeStateIndex, lzdec, approxState, curNodeTotalCost + actualCost, 
+							curNodeTotalComplexity + cShortMatchComplexity);
 					
 					//minTruncateMatchLen = LZHAM_MAX(minTruncateMatchLen, 2);
 					minTruncateMatchLen = minTruncateMatchLen > 2 ? minTruncateMatchLen : 2;
@@ -1925,7 +2036,8 @@ public class LZCompressor : CLZBase{
 							ulong matchTotalCost = curNodeTotalCost + lzdec_bitcosts[l];
 							uint matchTotalComplexity = curNodeTotalComplexity + matchComplexity;
 							
-							dstNode.add_state( curNodeIndex, curNodeStateIndex, new LZDecision(curDictOfs, l, matchDist), approxState, matchTotalCost, matchTotalComplexity);
+							dstNode.add_state( curNodeIndex, curNodeStateIndex, LZDecision(curDictOfs, l, matchDist), approxState,
+									matchTotalCost, matchTotalComplexity);
 						}
 						
 						prevMaxMatchLen = endLen;
@@ -1938,7 +2050,8 @@ public class LZCompressor : CLZBase{
 				uint litTotalComplexity = curNodeTotalComplexity + cLitComplexity;
 				
 				
-				curNode[1].add_state( curNodeIndex, curNodeStateIndex, new LZDecision(curDictOfs, 0, 0), approxState, litTotalCost, litTotalComplexity);
+				curNode[1].add_state( curNodeIndex, curNodeStateIndex, LZDecision(curDictOfs, 0, 0), approxState, litTotalCost, 
+						litTotalComplexity);
 				
 			} // cur_node_state_index
 			
@@ -2001,12 +2114,15 @@ public class LZCompressor : CLZBase{
 		parseState.m_failed = false;
 		parseState.m_emit_decisions_backwards = true;
 		
-		NodeState *pNodes = cast(NodeState*)(parseState.m_nodes);
+		NodeState[] pNodes = parseState.getAllNodeStates();//NodeState *pNodes = cast(NodeState*)(parseState.m_nodes);
 		pNodes[0].m_parent_index = -1;
 		pNodes[0].m_total_cost = 0;
 		pNodes[0].m_total_complexity = 0;
 		
-		memset( &pNodes[1], 0xFF, cMaxParseGraphNodes * NodeState.sizeof);
+		//memset( &pNodes[1], 0xFF, cMaxParseGraphNodes * NodeState.sizeof);
+		for(int i = 1; i < pNodes.length; i++){
+			pNodes[i].clear;
+		}
 		
 		State approxState = parseState.m_initial_state;
 		
@@ -2016,7 +2132,7 @@ public class LZCompressor : CLZBase{
 		
 		uint curDictOfs = parseState.m_start_ofs;
 		uint curLookaheadOfs = curDictOfs - lookaheadStartOfs;
-		uint curNodeIndex = 0;
+		uint curNodeIndex;
 		
 		enum { cMaxFullMatches = cMatchAccelMaxSupportedProbes }
 		uint[cMaxFullMatches] matchLens;
@@ -2025,7 +2141,7 @@ public class LZCompressor : CLZBase{
 		ulong[cMaxMatchLen + 1] lzdecBitcosts;
 		
 		while (curNodeIndex < bytesToParse){
-			NodeState* pCurNode = &pNodes[curNodeIndex];
+			NodeState pCurNode = pNodes[curNodeIndex];
 			uint helperVal = bytesToParse - curNodeIndex;
 			//const uint maxAdmissableMatchLen = LZHAM_MIN(static_cast<uint>(CLZBase::cMaxMatchLen), bytesToParse - curNodeIndex);
 			const uint maxAdmissableMatchLen = cast(uint)(CLZBase.cMaxMatchLen) > helperVal ? helperVal : cast(uint)(CLZBase.cMaxMatchLen);
@@ -2068,7 +2184,8 @@ public class LZCompressor : CLZBase{
 				if (histMatchLen >= matchHistMinMatchLen){
 					//matchHistMaxLen = math::maximum(matchHistMaxLen, histMatchLen);
 					
-					approxState.get_rep_match_costs(curDictOfs, lzdecBitcosts.ptr, repMatchIndex, matchHistMinMatchLen, histMatchLen, isMatchModelIndex);
+					approxState.get_rep_match_costs(curDictOfs, lzdecBitcosts.ptr, repMatchIndex, matchHistMinMatchLen, histMatchLen, 
+							isMatchModelIndex);
 					
 					uint rep_match_total_complexity = curNodeTotalComplexity + (cRep0Complexity + repMatchIndex);
 					for (uint l = matchHistMinMatchLen; l <= histMatchLen; l++){
@@ -2079,7 +2196,7 @@ public class LZCompressor : CLZBase{
 						 LZHAM_ASSERT(actual_cost == lzdec_bitcosts[l]);
 						 }
 						 #endif*/
-						NodeState* dstNode = &pCurNode[l];
+						NodeState dstNode = pNodes[curNodeIndex + l];//NodeState* dstNode = &pCurNode[l];
 						
 						ulong repMatchTotalCost = curNodeTotalCost + lzdecBitcosts[l];
 						
@@ -2125,7 +2242,7 @@ public class LZCompressor : CLZBase{
 						 }
 						 #endif*/
 						
-						NodeState* dstNode = &pCurNode[2];
+						NodeState dstNode = pNodes[curNodeIndex + 2];//NodeState dstNode = pCurNode[2];
 						
 						ulong matchTotalCost = curNodeTotalCost + cost;
 						uint matchTotalComplexity = curNodeTotalComplexity + cShortMatchComplexity;
@@ -2192,7 +2309,7 @@ public class LZCompressor : CLZBase{
 							 LZHAM_ASSERT(actual_cost == lzdec_bitcosts[l]);
 							 }
 							 #endif*/
-							NodeState* dstNode = &pCurNode[l];
+							NodeState dstNode = pNodes[curNodeIndex + l];//NodeState dstNode = pCurNode[l];
 							
 							ulong matchTotalCost = curNodeTotalCost + lzdecBitcosts[l];
 							uint matchTotalComplexity = curNodeTotalComplexity + match_complexity;
@@ -2230,13 +2347,22 @@ public class LZCompressor : CLZBase{
 			 LZHAM_ASSERT(actual_cost == lit_cost);
 			 }
 			 #endif*/
-			if ((litTotalCost < pCurNode[1].m_total_cost) || ((litTotalCost == pCurNode[1].m_total_cost) && (litTotalComplexity < pCurNode[1].m_total_complexity))){
+			if ((litTotalCost < pNodes[curNodeIndex + 1].m_total_cost) || ((litTotalCost == 
+					pNodes[curNodeIndex + 1].m_total_cost) && (litTotalComplexity < pNodes[curNodeIndex + 1].m_total_complexity))){
+				pNodes[curNodeIndex + 1].m_total_cost = litTotalCost;
+				pNodes[curNodeIndex + 1].m_total_complexity = litTotalComplexity;
+				pNodes[curNodeIndex + 1].m_parent_index = cast(short)curNodeIndex;
+				approxState.save_partial_state(pNodes[curNodeIndex + 1].m_saved_state);
+				pNodes[curNodeIndex + 1].m_lzdec.init(curDictOfs, 0, 0);
+			}
+			/*if ((litTotalCost < pCurNode[1].m_total_cost) || ((litTotalCost == pCurNode[1].m_total_cost) && (litTotalComplexity < 
+					pCurNode[1].m_total_complexity))){
 				pCurNode[1].m_total_cost = litTotalCost;
 				pCurNode[1].m_total_complexity = litTotalComplexity;
 				pCurNode[1].m_parent_index = cast(short)curNodeIndex;
 				approxState.save_partial_state(pCurNode[1].m_saved_state);
 				pCurNode[1].m_lzdec.init(curDictOfs, 0, 0);
-			}
+			}*/
 			
 			curDictOfs++;
 			curLookaheadOfs++;
@@ -2314,7 +2440,7 @@ public class LZCompressor : CLZBase{
 				//matchHistMaxLen = math::maximum(matchHistMaxLen, histMatchLen);
 				matchHistMaxLen = (matchHistMaxLen > histMatchLen ? matchHistMaxLen : histMatchLen);
 				
-				LZPricedDecision dec = new LZPricedDecision(ofs, histMatchLen, -1 * (cast(int)i + 1));
+				LZPricedDecision dec = LZPricedDecision(ofs, histMatchLen, -1 * (cast(int)i + 1));
 				dec.cost = curState.get_cost(this, m_accel, dec);
 				
 				/*if (!decisions.try_push_back(dec))
@@ -2345,7 +2471,7 @@ public class LZCompressor : CLZBase{
 							matchLen = m_accel.get_match_len(lookaheadOfs, pMatches.get_dist(), maxMatchLen, CLZBase.cMaxMatchLen);
 						}
 						
-						LZPricedDecision dec = new LZPricedDecision(ofs, matchLen, pMatches.get_dist());
+						LZPricedDecision dec = LZPricedDecision(ofs, matchLen, pMatches.get_dist());
 						dec.cost = curState.get_cost(this, m_accel, dec);
 						
 						/*if (!decisions.try_push_back(dec))
@@ -2452,6 +2578,9 @@ public class LZCompressor : CLZBase{
 		uint curOfs = 0;
 		uint bytesRemaining = bufLen;
 		while (bytesRemaining){
+			debug{
+				printf("compress_block remaining: %d\n",bytesRemaining);
+			}
 			//uint bytes_to_compress = math::minimum(m_accel.get_max_add_bytes(), bytesRemaining);
 			uint bytesToCompress = m_accel.get_max_add_bytes() > bytesRemaining ? bytesRemaining : m_accel.get_max_add_bytes();
 			if (!compress_block_internal((pBuf) + curOfs, bytesToCompress))
@@ -2601,7 +2730,8 @@ public class LZCompressor : CLZBase{
 				greedyParseState.m_issue_reset_state_partial = false;
 				greedyParseState.m_start_ofs = curDictOfs;
 				//greedyParseState.m_bytes_to_match = LZHAM_MIN(bytesToMatch, static_cast<uint>(CLZBase::cMaxHugeMatchLen));
-				greedyParseState.m_bytes_to_match = bytesToMatch > cast(uint)(CLZBase.cMaxHugeMatchLen) ? cast(uint)(CLZBase.cMaxHugeMatchLen) : bytesToMatch;
+				greedyParseState.m_bytes_to_match = bytesToMatch > cast(uint)(CLZBase.cMaxHugeMatchLen) ? 
+						cast(uint)(CLZBase.cMaxHugeMatchLen) : bytesToMatch;
 				
 				greedyParseState.m_max_greedy_decisions = maximum((bytesToMatch / cAvgAcceptableGreedyMatchLen), 2);
 				greedyParseState.m_greedy_parse_gave_up = false;
@@ -2613,16 +2743,16 @@ public class LZCompressor : CLZBase{
 						return false;
 				}
 				
-				uint numGreedyDecisionsToCode = 0;
+				uint numGreedyDecisionsToCode;
 				
 				LZDecision[] bestDecisions = greedyParseState.m_best_decisions; 
 				
 				if (!greedyParseState.m_greedy_parse_gave_up)
 					numGreedyDecisionsToCode = bestDecisions.length;
 				else{
-					uint numSmallDecisions = 0;
-					uint totalMatchLen = 0;
-					uint maxMatchLen = 0;
+					uint numSmallDecisions;
+					uint totalMatchLen;
+					uint maxMatchLen;
 					
 					uint i;
 					for (i = 0; i < bestDecisions.length; i++){
@@ -2677,7 +2807,7 @@ public class LZCompressor : CLZBase{
 				numParseJobs = 1;
 			
 			// Reduce block size near the beginning of the file so statistical models get going a bit faster.
-			bool forceSmallBlock = false;
+			bool forceSmallBlock;
 			if ((!m_block_index) && ((curDictOfs - m_block_start_dict_ofs) < cMaxParseGraphNodes)){
 				numParseJobs = 1;
 				forceSmallBlock = true;
@@ -2685,7 +2815,7 @@ public class LZCompressor : CLZBase{
 			
 			uint parseThreadStartOfs = curDictOfs;
 			//uint parse_thread_total_size = LZHAM_MIN(bytesToMatch, cMaxParseGraphNodes * numParseJobs);
-			uint helperVal = cMaxParseGraphNodes * numParseJobs;
+			const uint helperVal = cMaxParseGraphNodes * numParseJobs;
 			uint parseThreadTotalSize = bytesToMatch > helperVal ? helperVal : bytesToMatch;
 			if (forceSmallBlock){
 				//parseThreadTotalSize = LZHAM_MIN(parseThreadTotalSize, 1536);
@@ -2693,7 +2823,7 @@ public class LZCompressor : CLZBase{
 			}
 			
 			uint parseThreadRemaining = parseThreadTotalSize;
-			for (uint parseThreadIndex = 0; parseThreadIndex < numParseJobs; parseThreadIndex++){
+			for (uint parseThreadIndex ; parseThreadIndex < numParseJobs; parseThreadIndex++){
 				ParseThreadState* parseThread = &m_parse_thread_state[parseThreadIndex];
 				
 				parseThread.m_initial_state = m_state;
@@ -2713,7 +2843,8 @@ public class LZCompressor : CLZBase{
 					parseThread.m_bytes_to_match = parseThreadTotalSize / numParseJobs;
 				
 				//parseThread.m_bytes_to_match = LZHAM_MIN(parseThread.m_bytes_to_match, cMaxParseGraphNodes);
-				parseThread.m_bytes_to_match = parseThread.m_bytes_to_match > cMaxParseGraphNodes ? cMaxParseGraphNodes : parseThread.m_bytes_to_match;
+				parseThread.m_bytes_to_match = parseThread.m_bytes_to_match > cMaxParseGraphNodes ? cMaxParseGraphNodes : 
+						parseThread.m_bytes_to_match;
 				assert(parseThread.m_bytes_to_match > 0);
 				
 				parseThread.m_max_greedy_decisions = uint.max;
@@ -2996,7 +3127,7 @@ public class LZCompressor : CLZBase{
 		return true;
 	}
 	
-	bool init(InitParams params){
+	bool _init(InitParams params){
 		clear();
 		
 		if ((params.m_dict_size_log2 < CLZBase.cMinDictSizeLog2) || (params.m_dict_size_log2 > CLZBase.cMaxDictSizeLog2))
@@ -3124,11 +3255,13 @@ public class LZCompressor : CLZBase{
 		m_parse_jobs_remaining = 0;
 		
 		for (uint i = 0; i < cMaxParseThreads; i++){
-			ParseThreadState* parseState = &m_parse_thread_state[i];
-			if(parseState.m_initial_state is null)
-				parseState.m_initial_state = new State();
-			else
-				parseState.m_initial_state.clear();
+			ParseThreadState parseState = m_parse_thread_state[i];
+			if(parseState !is null){
+				if(parseState.m_initial_state is null)
+					parseState.m_initial_state = new State();
+				else
+					parseState.m_initial_state.clear();
+			}
 			
 			for (uint j = 0; j <= cMaxParseGraphNodes; j++)
 				parseState.m_nodes[j].clear();
@@ -3231,6 +3364,9 @@ public class LZCompressor : CLZBase{
 			uint numSrcBytesRemaining = bufLen;
 			
 			while (numSrcBytesRemaining){
+				debug{
+					printf("put_bytes remaining: %d\n",numSrcBytesRemaining);
+				}
 				//const uint num_bytes_to_copy = LZHAM_MIN(numSrcBytesRemaining, m_params.m_block_size - m_block_buf.size());
 				uint helperVal = m_params.m_block_size - m_block_buf.length;
 				uint numBytesToCopy = numSrcBytesRemaining > helperVal ? helperVal : numSrcBytesRemaining;

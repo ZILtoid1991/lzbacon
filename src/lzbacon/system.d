@@ -147,4 +147,10 @@ version(Windows){
 		free(errMsg);
 		return errMsgOut;
 	}
+	public @nogc int atomicExchange32(int* pDest, int val){
+		return win.InterlockedExchange(pDest, val);
+	}
+	public @nogc int atomicExchangeAdd(int* pDest, int val){
+		return win.InterlockedExchangeAdd(pDest, val);
+	}
 }

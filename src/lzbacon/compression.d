@@ -95,14 +95,14 @@ public LZHAMCompressState* compressInit(LZHAMCompressionParameters* params){
 			free(state);
 			return null;
 		}*/
-		/*if (state->m_tp.get_num_threads() >= internalParams.m_max_helper_threads){
+		/*if (state.m_tp.get_num_threads() >= internalParams.m_max_helper_threads){
 			internalParams.m_pTask_pool = &state->m_tp;
 		}else{
 			internalParams.m_max_helper_threads = 0;
 		}*/
 	}
 	state.compressor = new LZCompressor();
-	if (!state.compressor.init(internalParams)){
+	if (!state.compressor._init(internalParams)){
 		free(state);
 		return null;
 	}
@@ -131,18 +131,28 @@ public uint compressDeinit(LZHAMCompressState* state){
 		return 0;
 	
 	uint adler32 = state.compressor.get_src_adler32();
-	
+	state.compressor.destroy();
 	free(state);
 	
 	return adler32;
 }
-public LZHAMCompressionStatus compress(LZHAMCompressState* state, ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, size_t* outBufSize, bool noMoreInputBytesFlag){
-	return compress2(state, inBuf, inBufSize, outBuf, outBufSize, noMoreInputBytesFlag ? LZHAMFlushTypes.FINISH : LZHAMFlushTypes.NO_FLUSH);
+public LZHAMCompressionStatus compress(LZHAMCompressState* state, ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, 
+		size_t* outBufSize, bool noMoreInputBytesFlag){
+	return compress2(state, inBuf, inBufSize, outBuf, outBufSize, noMoreInputBytesFlag ? LZHAMFlushTypes.FINISH : 
+			LZHAMFlushTypes.NO_FLUSH);
 }
-public LZHAMCompressionStatus compress2(LZHAMCompressState* state, ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, size_t* outBufSize, LZHAMFlushTypes flushType){
+public LZHAMCompressionStatus compress2(LZHAMCompressState* state, ubyte* inBuf, size_t* inBufSize, ubyte* outBuf, 
+		size_t* outBufSize, LZHAMFlushTypes flushType){
 	//lzham_compress_state *pState = static_cast<lzham_compress_state*>(p);
+	//if(state.inBuf != inBuf){
+	/*state.inBuf = inBuf;
+	state.inBufSize = inBufSize;
+	state.outBuf = outBuf;
+	state.outBufSize = outBufSize;*/
+	//}
 	
-	if ((!state) || (!state.params.dictSizeLog2) || (state.status >= LZHAMCompressionStatus.FIRST_SUCCESS_OR_FAILURE_CODE) || (!inBufSize) || (!outBufSize))
+	if ((!state) || (!state.params.dictSizeLog2) || (state.status >= LZHAMCompressionStatus.FIRST_SUCCESS_OR_FAILURE_CODE) 
+			|| (!inBufSize) || (!outBufSize))
 		return LZHAMCompressionStatus.INVALID_PARAMETER;
 	
 	if ((*inBufSize) && (!inBuf))
@@ -247,7 +257,8 @@ public LZHAMCompressionStatus compress2(LZHAMCompressState* state, ubyte* inBuf,
 	
 	return state.status;
 }
-LZHAMCompressionStatus lzham_lib_compress_memory(LZHAMCompressionParameters *params, ubyte* dstBuf, size_t* dstLen, ubyte* srcBuf, size_t srcLen, uint* adler32){
+LZHAMCompressionStatus compressMemory(LZHAMCompressionParameters *params, ubyte* dstBuf, size_t* dstLen, ubyte* srcBuf, 
+		size_t srcLen, uint* adler32){
 	if ((!params) || (!dstLen))
 		return LZHAMCompressionStatus.INVALID_PARAMETER;
 	
@@ -281,7 +292,7 @@ LZHAMCompressionStatus lzham_lib_compress_memory(LZHAMCompressionParameters *par
 		return LZHAMCompressionStatus.FAILED;
 	}
 	
-	if (!compressor.init(internalParams)){
+	if (!compressor._init(internalParams)){
 		//lzham_delete(pTP);
 		//lzham_delete(compressor);
 		return LZHAMCompressionStatus.INVALID_PARAMETER;
